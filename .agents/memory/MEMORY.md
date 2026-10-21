@@ -1,0 +1,1 @@
+- [Absent Note Converter privacy](absent-note-converter-privacy.md) — MIDI/WAV work and profile storage must remain local to the browser.

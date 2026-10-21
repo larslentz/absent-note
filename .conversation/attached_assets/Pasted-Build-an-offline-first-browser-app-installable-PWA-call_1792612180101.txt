@@ -1,0 +1,154 @@
+Build an offline-first browser app (installable PWA) called Absent Note Converter. It turns a standard MIDI file into an "absent note" MIDI file: every source note is replaced by a group of its harmonics (default 2, 3, 4, 5). The original note (harmonic 1) is never output, so the listener infers the missing fundamental. The app also includes a sine-wave preview and an optional piano calibration mode that measures a user-rendered piano recording and adjusts velocities and tuning.
+
+Platform and architecture
+Vite + TypeScript + React (or vanilla TS if simpler). No backend, no accounts, no analytics, no CDN dependencies at runtime. All processing happens locally in the browser.
+
+Service worker + web manifest so the app works fully offline after first load.
+
+Bundle every dependency locally. A MIDI parser/writer library such as @tonejs/midi is fine if it is bundled. You may write a small Standard MIDI File writer if you need raw control (RPN messages, pitch bend, channel assignment).
+
+Keep the core conversion logic in pure, UI-independent modules (src/core/) with unit tests (Vitest).
+
+Persist user presets and calibration profiles in IndexedDB, with JSON export/import.
+
+Never modify the user's original file. Every export is a new file with a descriptive name, for example tune_absent_h2-5_eq_bend2.mid.
+
+Core formulas (implement exactly)
+MIDI note to frequency: f0 = A4 * 2^((m - 69) / 12), where A4 defaults to 440 Hz and can be edited.
+
+Harmonic frequency: f_h = h * f0. Harmonic 1 must never be included.
+
+Exact pitch offset: offset_h = 12 * log2(h).
+
+Integer offset: n_h = round(offset_h). Fine-tuning correction in cents: c_h = 100 * (offset_h - n_h).
+
+Expected values for the tests: h2 = +12 / 0 cents, h3 = +19 / +1.955 cents, h4 = +24 / 0 cents, h5 = +28 / −13.686 cents.
+
+Pitch bend (14-bit, center 8192) for bend range ±R semitones: B = clamp(round(8192 + 8192 * c / (100 * R)), 0, 16383). Also show the signed value B − 8192 for libraries that use a signed format.
+
+Harmonic weighting: w_h = (2 / h)^alpha. Presets: Equal (alpha = 0), Gentle (0.5), Strong (1.0), or Custom per-harmonic dB values. Display L_h = 20 * log10(w_h) dB.
+
+Baked velocity: v_h = clamp(round(v_src * w_h^(1/gamma)), 1, 127), with gamma defaulting to 2 and adjustable from 1 to 3.
+
+Test case: source velocity 90, alpha 1, gamma 2 gives 90, 73, 64, 57.
+
+Conversion features
+Import: drag-and-drop or file picker for .mid/.midi. Show tracks with name, channel, note count, pitch range, and whether each track contains pitch bend, sustain (CC64), or channel-10 drums.
+
+Track selection: choose which tracks to convert. Exclude drums by default. Unconverted tracks can be dropped or passed through unchanged.
+
+Harmonic set: checkboxes for harmonics 2–8 (default 2–5), with a live table of the offset, correction in cents, pitch bend value, and dB level for each harmonic.
+
+Channel layout (fixed-tuning mode): one output MIDI channel per harmonic, skipping channel 10. Before the first note on each channel, write:
+
+The RPN 0 pitch-bend-range setup: CC101 = 0, CC100 = 0, CC6 = R, CC38 = 0, then the RPN null (CC101 = 127, CC100 = 127).
+
+The fixed pitch bend for that harmonic.
+
+An optional Program Change.
+Put each harmonic on its own named track, for example "H3 (+19, +1.955c)". Bend range R defaults to 2 semitones and can be set from 1 to 24.
+
+Timing: keep each note-on and note-off at its original tick. Preserve the PPQ, tempo map, time signatures, and key signatures.
+
+Velocity/balance method (radio button):
+
+(a) External layer gain: copy the source velocity unchanged to every layer, and show the recommended per-layer dB gains for the user to set in their DAW mixer (this is the default).
+
+(b) Bake into velocities: use the baked-velocity formula above.
+
+Also include a global velocity scale and an option to preserve or flatten the source dynamics.
+
+Range handling: if m + n_h > 127, choose the policy: skip that harmonic note and log it (default), or drop the whole source note. Never wrap or silently fold octaves. Show a warnings panel with the counts and the affected bar and beat positions.
+
+Sustain pedal: choose between copying CC64 to every harmonic channel (default) or baking sustain into note durations.
+
+Existing pitch bend in the source: warn the user and offer to ignore it, or to add it to each layer's fixed correction (the summed value is clamped, with a warning if clamping occurs).
+
+Polyphony: in fixed-tuning mode, chords are fine because the correction depends only on the harmonic number. State this in the UI.
+
+Export: Standard MIDI File type 1. Also export a JSON settings sidecar that records every parameter, so a conversion can be reproduced.
+
+Preview
+Use the Web Audio API for a built-in sine preview: each output note is a sine oscillator at its exact h * f0 frequency (not a pitch-bent approximation), with identical attack/release envelopes on every layer and an amplitude of w_h scaled by velocity.
+
+Add a master preview gain with automatic headroom (divide by the sum of the weights) and a limiter that prevents clipping.
+
+A/B toggles:
+
+Absent version.
+
+The original melody as sines.
+
+Absent version plus a quiet reference fundamental.
+
+Each harmonic soloed or muted.
+
+Add transport controls (play/stop/loop selection), a tempo-synced piano-roll view that shows the source notes as ghost outlines and the harmonic notes as colored bars per harmonic, and a spectrum view of the preview output.
+
+Add an offline WAV render of the sine preview, using OfflineAudioContext, at 48 kHz / 24-bit.
+
+Piano calibration mode
+The goal is to adapt the velocities and fine tuning to the user's specific piano patch. The app must clearly state that MIDI cannot reshape a piano's internal partials, and that a piano will not behave like pure sines.
+
+Generate calibration MIDI: the user chooses the key range (default: the range actually used by the converted harmonic layers) and a velocity list (default 32, 48, 64, 80, 96, 112, editable). Each test note is 2 s long, followed by 2 s of silence (both editable). The sequence starts with a 1 s count-in click note on a distinct key for alignment. There is no pedal. Export the MIDI file plus a JSON schedule.
+
+Instructions shown in the app: render the file through the exact piano patch at fixed gain, with no normalization, reverb, compression, or pedal. Export a WAV at 44.1 or 48 kHz.
+
+Upload and analysis: decode the WAV locally, align it to the known schedule (detect the click onset, then refine each note's onset within ±50 ms), and for each key and velocity measure:
+
+The whole-note RMS level in an attack window (0–150 ms) and a sustain window (300–1500 ms), both editable.
+
+The level of the fundamental component: FFT energy in a ±40 cent band around the expected fundamental.
+
+The measured fundamental frequency, using parabolic interpolation of the FFT peak near the expected frequency, and the deviation in cents.
+
+The decay rate in dB/s.
+
+Flag likely velocity-layer jumps, where the spectral centroid changes abruptly between neighboring velocities.
+
+Profile: store the results as a lookup table A(key, velocity) per measurement mode, with linear interpolation across velocity and across keys that were not measured. Show a heatmap and per-key curves. Profiles can be saved, named, exported, and imported.
+
+Calibrated conversion:
+
+Velocity: for each harmonic note, choose v* = argmin_v |A(n_h, v) − T_h|, where T_h is the target amplitude derived from the source velocity and w_h. The user chooses whether to balance by whole-note level or by fundamental-component level, and by the attack or sustain window.
+
+Tuning: compute the correction c = 1200 * log2((h * f0) / f_measured(n_h)).
+
+Because the corrections now vary per key, use a dynamic voice allocator: assign each sounding note to a free channel from a pool of up to 15 channels (excluding 10), set that channel's bend just before the note-on, and reuse the channel only after its note-off plus a release guard time.
+
+If the pool runs out, either steal the oldest voice or fall back to the nearest correction, and log each such event.
+
+Also offer an MPE export option (lower zone, member channels 2–16) for synths that support MPE.
+
+Show a clear summary of what calibration corrected (levels and fundamental tuning) and what it cannot correct (piano inharmonicity and the internal spectrum).
+
+UI and design
+A single-page workflow with steps: Import → Select tracks → Harmonics & balance → Preview → (optional) Calibrate → Export.
+
+Every parameter stays visible and editable. Show the formulas and computed values next to the controls. No hidden automation.
+
+Use a dark, quiet studio theme with readable, high-contrast text and keyboard shortcuts (space for play/stop).
+
+Include a help panel that explains the missing-fundamental effect, the difference between fixed-tuning and calibrated modes, why separate channels are needed for independent pitch bend, and that the perceived effect varies between listeners and playback systems.
+
+Tests (must pass)
+Offset, cents, and pitch-bend values for h = 2–8, at R = 2 and R = 12.
+
+The baked-velocity example (90 → 90, 73, 64, 57).
+
+A2 (MIDI 45) maps to MIDI notes 57/64/69/73 at frequencies of 220/330/440/550 Hz.
+
+Round trip: import → convert → re-parse gives the expected note count, the correct ticks, the correct channels, RPN messages before the first note, and no harmonic-1 notes.
+
+Range policy cases near MIDI note 127.
+
+The voice allocator never assigns two overlapping notes with different bends to the same channel.
+
+The calibration analysis on a synthetic WAV (generated in the test from sines with known levels and a known detune) recovers the levels within 0.5 dB and the tuning within 1 cent.
+
+Deliverables
+A working app, a README covering how to run it offline and how to install it as a PWA, and the formula reference and workflow notes.
+
+Include a sample MIDI file (a short monophonic melody) for a quick demo.
+
+Build in this order and confirm that each stage works before moving on: (1) core math with tests, (2) import/convert/export, (3) sine preview, (4) calibration mode.

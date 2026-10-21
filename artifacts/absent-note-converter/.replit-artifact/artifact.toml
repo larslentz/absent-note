@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Absent Note Converter"
+description = "An offline-first installable browser app that converts MIDI melodies into harmonic layers, previews the missing-fundamental effect, and optionally calibrates output to a piano recording."
+version = "1.0.0"
+id = "artifacts/absent-note-converter"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 23573
+
+[services.development]
+run = "pnpm --filter @workspace/absent-note-converter run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/absent-note-converter", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/absent-note-converter/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "23573"
+BASE_PATH = "/"
