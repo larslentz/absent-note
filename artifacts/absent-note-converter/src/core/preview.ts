@@ -1,5 +1,14 @@
 import type { Midi } from "@tonejs/midi";
-import { harmonicFrequency, harmonicWeight, midiToFrequency } from "./math";
+import {
+  harmonicFrequency,
+  harmonicOffset,
+  harmonicWeight,
+  midiToFrequency,
+  weightFromDecibels,
+} from "./math";
+import type { HarmonicSelectionPlan } from "./harmonic-selection";
+import { sourceEventId } from "./harmonic-selection";
+import type { RangePolicy } from "./math";
 
 export type PreviewVariant = "absent" | "original" | "reference";
 export type PreviewOptions = {
@@ -15,6 +24,10 @@ export type PreviewOptions = {
   loop?: boolean;
   loopStartSec?: number;
   loopEndSec?: number;
+  selectionPlan?: HarmonicSelectionPlan;
+  customDb?: Record<number, number>;
+  normalization?: "off" | "sum-squares";
+  rangePolicy?: RangePolicy;
 };
 
 export type PreviewVoice = {
@@ -28,12 +41,16 @@ export type PreviewVoice = {
 
 export function buildPreviewVoices(midi: Midi, options: PreviewOptions) {
   const selectedTracks = new Set(options.tracks);
-  const weights = options.harmonics.map((h) => harmonicWeight(h, options.alpha));
-  const headroom = weights.reduce((sum, weight) => sum + weight, 0) || 1;
+  const getWeight = (harmonic: number) => {
+    const customDb = options.customDb?.[harmonic];
+    return customDb === undefined
+      ? harmonicWeight(harmonic, options.alpha)
+      : weightFromDecibels(customDb);
+  };
   const voices: PreviewVoice[] = [];
   midi.tracks.forEach((track, trackIndex) => {
     if (!selectedTracks.has(trackIndex)) return;
-    for (const note of track.notes) {
+    for (const [noteIndex, note] of track.notes.entries()) {
       if (options.variant === "original") {
         voices.push({
           frequency: midiToFrequency(note.midi, options.a4),
@@ -45,16 +62,33 @@ export function buildPreviewVoices(midi: Midi, options: PreviewOptions) {
         });
         continue;
       }
-      for (const harmonic of options.harmonics) {
+      const eventId = sourceEventId(trackIndex, note, noteIndex);
+      const requestedHarmonics =
+        options.selectionPlan?.selections[eventId] ?? options.harmonics;
+      const invalid =
+        requestedHarmonics.some(
+          (harmonic) => note.midi + harmonicOffset(harmonic).semitones > 127,
+        );
+      if (invalid && options.rangePolicy === "drop-source") continue;
+      const eventHarmonics = requestedHarmonics.filter(
+        (harmonic) => note.midi + harmonicOffset(harmonic).semitones <= 127,
+      );
+      const eventWeights = eventHarmonics.map(getWeight);
+      const sumSquares = Math.sqrt(
+        eventWeights.reduce((sum, weight) => sum + weight * weight, 0),
+      );
+      for (const harmonic of eventHarmonics) {
         if (options.mutedHarmonics?.includes(harmonic)) continue;
         if (options.soloHarmonic && options.soloHarmonic !== harmonic) continue;
-        const weight = harmonicWeight(harmonic, options.alpha);
+        const weight = getWeight(harmonic);
         voices.push({
           frequency: harmonicFrequency(note.midi, harmonic, options.a4),
           start: note.time,
           duration: note.duration,
-          amplitude:
-            (note.velocity * weight * (options.gain ?? 1)) / headroom,
+          amplitude: note.velocity *
+            weight *
+            (options.gain ?? 1) /
+            (options.normalization === "sum-squares" ? sumSquares || 1 : 1),
           harmonic,
           sourceNote: note.midi,
         });
@@ -146,14 +180,7 @@ export async function playPreview(midi: Midi, options: PreviewOptions) {
   await context.resume();
   const master = context.createGain();
   master.gain.value = Math.max(0, Math.min(1, options.gain ?? 0.72));
-  const limiter = context.createDynamicsCompressor();
-  limiter.threshold.value = -3;
-  limiter.knee.value = 4;
-  limiter.ratio.value = 12;
-  limiter.attack.value = 0.003;
-  limiter.release.value = 0.12;
-  master.connect(limiter);
-  limiter.connect(context.destination);
+  master.connect(context.destination);
   const voices = buildPreviewVoices(midi, {
     ...options,
     gain: 1,
@@ -194,7 +221,6 @@ export async function playPreview(midi: Midi, options: PreviewOptions) {
         }
       }
       master.disconnect();
-      limiter.disconnect();
       await context.close();
     },
   };
@@ -252,12 +278,7 @@ export async function renderPreviewWav(
   const context = new OfflineContext(1, Math.ceil(duration * sampleRate), sampleRate);
   const master = context.createGain();
   master.gain.value = Math.max(0, Math.min(1, options.gain ?? 0.72));
-  const limiter = context.createDynamicsCompressor();
-  limiter.threshold.value = -3;
-  limiter.knee.value = 4;
-  limiter.ratio.value = 12;
-  master.connect(limiter);
-  limiter.connect(context.destination);
+  master.connect(context.destination);
   scheduleVoices(context, voices, 0, master);
   const rendered = await context.startRendering();
   return floatTo24BitWav(rendered.getChannelData(0), sampleRate);

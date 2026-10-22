@@ -20,6 +20,13 @@ import {
   weightFromDecibels,
   type RangePolicy,
 } from "./math";
+import {
+  collectSourceNoteEvents,
+  greatestCommonDivisor,
+  sourceEventId,
+  type HarmonicSelectionPlan,
+  type HarmonicSelectionSettings,
+} from "./harmonic-selection";
 
 export type TrackSummary = {
   index: number;
@@ -59,6 +66,7 @@ export type ConversionOptions = {
   calibrationExhaustion?: "steal-oldest" | "nearest-correction";
   releaseGuardTicks?: number;
   mpe?: boolean;
+  harmonicSelectionPlan?: HarmonicSelectionPlan;
 };
 
 export type ConversionWarning = {
@@ -79,20 +87,24 @@ export type ConversionResult = {
   outputTrackCount: number;
   outputFileName: string;
   settings: ConversionOptions;
+  harmonicSelectionPlan: HarmonicSelectionPlan;
 };
 
 function assertOptions(options: ConversionOptions) {
   if (!options.selectedTracks.length) {
     throw new Error("Choose at least one MIDI track to convert.");
   }
+  const selectedHarmonics = options.harmonicSelectionPlan
+    ? Object.values(options.harmonicSelectionPlan.selections).flat()
+    : options.harmonics;
   if (
-    !options.harmonics.length ||
-    options.harmonics.some(
+    !selectedHarmonics.length ||
+    selectedHarmonics.some(
       (harmonic) =>
-        !Number.isInteger(harmonic) || harmonic < 2 || harmonic > 8,
+        !Number.isInteger(harmonic) || harmonic < 2 || harmonic > 16,
     )
   ) {
-    throw new Error("Choose one or more harmonics from 2 through 8.");
+    throw new Error("Choose one or more harmonics from 2 through 16.");
   }
   if (new Set(options.harmonics).size !== options.harmonics.length) {
     throw new Error("Harmonic selections must be unique.");
@@ -242,11 +254,64 @@ export function convertMidi(
   output.header.fromJSON(source.header.toJSON());
   const warnings: ConversionWarning[] = [];
   const selected = new Set(options.selectedTracks);
+  const selectedTrackIndexes = [...selected].sort((a, b) => a - b);
   const selectedTracks = source.tracks.filter((_, index) => selected.has(index));
   if (selectedTracks.length !== selected.size) {
     throw new Error("A selected MIDI track no longer exists.");
   }
-  const harmonics = [...options.harmonics].sort((a, b) => a - b);
+  const sourceEvents = collectSourceNoteEvents(source, selectedTrackIndexes);
+  const suppliedPlan = options.harmonicSelectionPlan;
+  const fallbackSettings: HarmonicSelectionSettings = {
+    mode: "custom",
+    customSet: [...options.harmonics],
+    seed: "legacy-fixed-set",
+    scope: "conversion",
+  };
+  const harmonicSelectionPlan: HarmonicSelectionPlan =
+    suppliedPlan ??
+    (() => {
+      const selectedSet = [...options.harmonics].sort((a, b) => a - b);
+      return {
+        settings: fallbackSettings,
+        sourceEventIds: sourceEvents.map((event) => event.id),
+        selections: Object.fromEntries(
+          sourceEvents.map((event) => [event.id, selectedSet]),
+        ),
+        groups: sourceEvents.length
+          ? [
+              {
+                id: "conversion",
+                eventIds: sourceEvents.map((event) => event.id),
+                harmonics: selectedSet,
+                requestedHarmonics: selectedSet,
+                gcd: greatestCommonDivisor(selectedSet),
+                baseMultiplier: greatestCommonDivisor(selectedSet),
+                intervalSemitones:
+                  12 * Math.log2(greatestCommonDivisor(selectedSet)),
+              },
+            ]
+          : [],
+        requestedSelections: Object.fromEntries(
+          sourceEvents.map((event) => [event.id, selectedSet]),
+        ),
+        skippedLayers: {},
+      };
+    })();
+  const requestedSelections =
+    harmonicSelectionPlan.requestedSelections ??
+    harmonicSelectionPlan.selections;
+  const plannedUnion = [
+    ...new Set(Object.values(harmonicSelectionPlan.selections).flat()),
+  ].sort((a, b) => a - b);
+  const harmonics = plannedUnion.length
+    ? plannedUnion
+    : [...options.harmonics].sort((a, b) => a - b);
+  for (const event of sourceEvents) {
+    if (!harmonicSelectionPlan.selections[event.id]) {
+      throw new Error(`The harmonic plan is missing source event ${event.id}.`);
+    }
+  }
+  const actualSelections: Record<string, number[]> = {};
   const calibrated = options.calibrationEnabled ?? false;
   if (calibrated && !options.calibrationProfile) {
     throw new Error("Choose a saved calibration profile before calibrated conversion.");
@@ -313,9 +378,14 @@ export function convertMidi(
 
   let outputNoteCount = 0;
   let voiceSequence = 0;
-  selectedTracks.forEach((sourceTrack, trackIndex) => {
-    for (const note of sourceTrack.notes) {
-      const invalidHarmonics = harmonics.filter((harmonic) => {
+  selectedTracks.forEach((sourceTrack, selectedTrackIndex) => {
+    const trackIndex = selectedTrackIndexes[selectedTrackIndex];
+    sourceTrack.notes.forEach((note, noteIndex) => {
+      const eventId = sourceEventId(trackIndex, note, noteIndex);
+      const eventHarmonics = harmonicSelectionPlan.selections[eventId] ?? [];
+      const actualForEvent: number[] = [];
+      actualSelections[eventId] = actualForEvent;
+      const invalidHarmonics = eventHarmonics.filter((harmonic) => {
         const offset = harmonicOffset(harmonic);
         return note.midi + offset.semitones > 127;
       });
@@ -330,9 +400,16 @@ export function convertMidi(
           bar: position.bar,
           beat: position.beat,
         });
+        warnings.push({
+          type: "range",
+          message: `The effective harmonic set for this source note is empty after the range policy; requested {${eventHarmonics.join(", ")}}.`,
+          trackIndex,
+          note: note.midi,
+          ticks: note.ticks,
+        });
         continue;
       }
-      for (const harmonic of harmonics) {
+      for (const harmonic of eventHarmonics) {
         const offset = harmonicOffset(harmonic);
         const rangeResult = applyRangePolicy(
           note.midi,
@@ -353,6 +430,7 @@ export function convertMidi(
           });
           continue;
         }
+        actualForEvent.push(harmonic);
         const weight = settingWeight(harmonic, options);
         const sourceVelocity = options.flattenDynamics
           ? (options.flattenedVelocity ?? 90)
@@ -433,7 +511,17 @@ export function convertMidi(
         });
         outputNoteCount += 1;
       }
-    }
+      if (actualForEvent.length < eventHarmonics.length) {
+        const effectiveGcd = greatestCommonDivisor(actualForEvent);
+        warnings.push({
+          type: "range",
+          message: `Effective set {${actualForEvent.join(", ")}} differs from requested {${eventHarmonics.join(", ")}} after range skips; GCD ${effectiveGcd}.`,
+          trackIndex,
+          note: note.midi,
+          ticks: note.ticks,
+        });
+      }
+    });
   });
 
   if (calibrated) {
@@ -525,6 +613,50 @@ export function convertMidi(
     });
   }
 
+  const eventGroupId = new Map<string, string>();
+  for (const group of harmonicSelectionPlan.groups) {
+    for (const eventId of group.eventIds) eventGroupId.set(eventId, group.id);
+  }
+  const effectiveGroups = new Map<
+    string,
+    { eventIds: string[]; harmonics: number[]; requestedHarmonics: number[] }
+  >();
+  const skippedLayers: Record<string, number[]> = {};
+  for (const event of sourceEvents) {
+    const actual = [...(actualSelections[event.id] ?? [])].sort((a, b) => a - b);
+    const requested = [...(requestedSelections[event.id] ?? [])].sort((a, b) => a - b);
+    skippedLayers[event.id] = requested.filter((harmonic) => !actual.includes(harmonic));
+    const groupId = eventGroupId.get(event.id) ?? "unassigned";
+    const key = `${groupId}:${actual.join(",")}`;
+    const existing = effectiveGroups.get(key);
+    if (existing) {
+      existing.eventIds.push(event.id);
+    } else {
+      effectiveGroups.set(key, {
+        eventIds: [event.id],
+        harmonics: actual,
+        requestedHarmonics: requested,
+      });
+    }
+  }
+  const effectivePlan: HarmonicSelectionPlan = {
+    ...harmonicSelectionPlan,
+    selections: actualSelections,
+    requestedSelections,
+    skippedLayers,
+    groups: [...effectiveGroups.entries()].map(([id, group]) => {
+      const divisor = greatestCommonDivisor(group.harmonics);
+      return {
+        id,
+        eventIds: group.eventIds,
+        harmonics: group.harmonics,
+        requestedHarmonics: group.requestedHarmonics,
+        gcd: divisor,
+        baseMultiplier: divisor,
+        intervalSemitones: divisor ? 12 * Math.log2(divisor) : 0,
+      };
+    }),
+  };
   const weightSummary = harmonics
     .map((harmonic) => {
       const weight = settingWeight(harmonic, options);
@@ -541,7 +673,13 @@ export function convertMidi(
     noteCount: outputNoteCount,
     outputTrackCount: output.tracks.length,
     outputFileName,
-    settings: { ...options, harmonics, bendRange },
+    settings: {
+      ...options,
+      harmonics,
+      bendRange,
+      harmonicSelectionPlan: effectivePlan,
+    },
+    harmonicSelectionPlan: effectivePlan,
   };
 }
 
@@ -573,6 +711,7 @@ export function settingsSidecar(result: ConversionResult) {
       sourceFileName: result.outputFileName.replace(/_absent_.*$/, ""),
       outputFileName: result.outputFileName,
       parameters: result.settings,
+      harmonicSelectionPlan: result.harmonicSelectionPlan,
       warnings: result.warnings,
       convertedNoteCount: result.noteCount,
       outputTrackCount: result.outputTrackCount,

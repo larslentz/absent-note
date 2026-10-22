@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Midi } from '@tonejs/midi';
 import {
   Activity, ArrowDownToLine, AudioLines, Check, ChevronDown, CircleHelp,
@@ -18,7 +18,20 @@ import {
   type TrackSummary,
 } from './core/midi';
 import { pitchBendForCents } from './core/math';
+import { midiToFrequency } from './core/math';
 import { playPreview, renderPreviewWav, type PreviewVariant } from './core/preview';
+import {
+  collectSourceNoteEvents,
+  createHarmonicSelectionPlan,
+  greatestCommonDivisor,
+  midiBarTiming,
+  SUPPORTED_HARMONICS,
+  summarizeGcdGroups,
+  type HarmonicSelectionMode,
+  type HarmonicSelectionPlan,
+  type HarmonicSelectionSettings,
+  type RandomizationScope,
+} from './core/harmonic-selection';
 import {
   analyzeCalibrationAudio,
   createCalibrationMidi,
@@ -42,18 +55,47 @@ function Toggle({ checked, onChange, label, testId }: { checked: boolean; onChan
   return <button type="button" role="switch" aria-checked={checked} aria-label={label} data-testid={testId} className={`toggle ${checked ? 'on' : ''}`} onClick={onChange} />;
 }
 
-function PianoRoll({ midi, selectedTracks, harmonics }: { midi: Midi | null; selectedTracks: number[]; harmonics: number[] }) {
-  const sourceNotes = midi?.tracks.flatMap((track, index) => selectedTracks.includes(index) ? track.notes : []) ?? [];
-  const notes = sourceNotes.flatMap(note => [
-    { midi: note.midi, time: note.time, duration: note.duration, source: true, harmonic: 1 },
-    ...harmonics.map(harmonic => ({ midi: note.midi + harmonicOffset(harmonic).semitones, time: note.time, duration: note.duration, source: false, harmonic })),
-  ]).filter(note => note.midi <= 127);
+function HarmonicChooser({ values, selected, onToggle, testPrefix }: {
+  values: number[];
+  selected: number[];
+  onToggle: (harmonic: number) => void;
+  testPrefix: string;
+}) {
+  return <div className="harmonic-pool" role="group" aria-label="Harmonic candidates">
+    {values.map(harmonic => <button
+      type="button"
+      key={harmonic}
+      className={`harmonic ${selected.includes(harmonic) ? 'active' : ''}`}
+      aria-pressed={selected.includes(harmonic)}
+      aria-label={`Harmonic ${harmonic}`}
+      onClick={() => onToggle(harmonic)}
+      data-testid={`${testPrefix}-${harmonic}`}
+    >{harmonic}</button>)}
+  </div>;
+}
+
+function PianoRoll({ midi, selectedTracks, harmonics, selectionPlan }: {
+  midi: Midi | null;
+  selectedTracks: number[];
+  harmonics: number[];
+  selectionPlan?: HarmonicSelectionPlan | null;
+}) {
+  const sourceEvents = midi ? collectSourceNoteEvents(midi, selectedTracks) : [];
+  const notes = sourceEvents.flatMap(event => {
+    const note = midi?.tracks[event.trackIndex]?.notes[event.noteIndex];
+    if (!note) return [];
+    const eventHarmonics = selectionPlan?.selections[event.id] ?? harmonics;
+    return [
+      { midi: note.midi, time: note.time, duration: note.duration, source: true, harmonic: 1 },
+      ...eventHarmonics.map(harmonic => ({ midi: note.midi + harmonicOffset(harmonic).semitones, time: note.time, duration: note.duration, source: false, harmonic })),
+    ];
+  }).filter(note => note.midi <= 127);
   const minNote = notes.length ? Math.max(0, Math.min(...notes.map(note => note.midi)) - 2) : 57;
   const maxNote = notes.length ? Math.min(127, Math.max(...notes.map(note => note.midi)) + 2) : 73;
   const range = Math.max(1, maxNote - minNote + 1);
   const duration = Math.max(1, midi?.duration ?? 1);
   const rows = Array.from({ length: Math.min(range, 24) }, (_, index) => maxNote - index);
-  const colors: Record<number, string> = { 2: '#7bc2ad', 3: '#80aee0', 4: '#d4b577', 5: '#c58bd1', 6: '#d48676', 7: '#a3c66a', 8: '#8db8c9' };
+  const colors: Record<number, string> = { 2: '#7bc2ad', 3: '#80aee0', 4: '#d4b577', 5: '#c58bd1', 6: '#d48676', 7: '#a3c66a', 8: '#8db8c9', 9: '#7ea9a1', 10: '#c98970', 11: '#a4a8d5', 12: '#8dc77e', 13: '#d6a85c', 14: '#7dbde0', 15: '#d27d9c', 16: '#b2c773' };
   return (
     <svg className="piano-roll" viewBox="0 0 620 134" preserveAspectRatio="none" role="img" aria-label={midi ? "Source notes and harmonic note layout" : "Piano roll waiting for MIDI"}>
       <rect width="620" height="134" fill="#12171c" />
@@ -92,9 +134,25 @@ function App() {
   const [playing, setPlaying] = useState(false);
   const [toast, setToast] = useState<ToastMessage>(null);
   const [harmonics, setHarmonics] = useState<number[]>([2, 3, 4, 5]);
+  const [selectionMode, setSelectionMode] = useState<HarmonicSelectionMode>('reference');
+  const [oddMaximum, setOddMaximum] = useState(9);
+  const [evenMaximum, setEvenMaximum] = useState(8);
+  const [candidatePool, setCandidatePool] = useState<number[]>([2, 3, 4, 5, 6, 7, 8]);
+  const [selectedCount, setSelectedCount] = useState(4);
+  const [minimumCount, setMinimumCount] = useState(3);
+  const [anchors, setAnchors] = useState<number[]>([2, 3]);
+  const [optionalPool, setOptionalPool] = useState<number[]>([4, 5, 6, 7, 8]);
+  const [optionalCount, setOptionalCount] = useState(2);
+  const [gcdSafeguard, setGcdSafeguard] = useState(true);
+  const [randomSeed, setRandomSeed] = useState('absent-note-demo-1');
+  const [randomScope, setRandomScope] = useState<RandomizationScope>('conversion');
+  const [normalization, setNormalization] = useState<'off' | 'sum-squares'>('off');
+  const [inspectedEventId, setInspectedEventId] = useState('');
   const [alpha, setAlpha] = useState(0);
   const [weightPreset, setWeightPreset] = useState<'Equal' | 'Gentle' | 'Strong' | 'Alpha' | 'Custom'>('Equal');
-  const [customDb, setCustomDb] = useState<Record<number, number>>({ 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0 });
+  const [customDb, setCustomDb] = useState<Record<number, number>>(
+    Object.fromEntries(SUPPORTED_HARMONICS.map(harmonic => [harmonic, 0])),
+  );
   const [gain, setGain] = useState(72);
   const [gamma, setGamma] = useState(2);
   const [globalVelocityScale, setGlobalVelocityScale] = useState(1);
@@ -133,6 +191,54 @@ function App() {
   const [fileFormat, setFileFormat] = useState<string | null>(null);
   const previewRef = useRef<{ stop: () => Promise<void> } | null>(null);
 
+  const sourceEvents = useMemo(
+    () => sourceMidi ? collectSourceNoteEvents(sourceMidi, selectedTracks) : [],
+    [sourceMidi, selectedTracks],
+  );
+  const barTiming = useMemo(
+    () => sourceMidi ? midiBarTiming(sourceMidi) : {
+      supported: true,
+      signatures: [{ ticks: 0, numerator: 4, denominator: 4 }],
+      ticksPerQuarter: 480,
+    },
+    [sourceMidi],
+  );
+  const harmonicSelectionSettings = useMemo<HarmonicSelectionSettings>(() => ({
+    mode: selectionMode,
+    customSet: harmonics,
+    maximumHarmonic: selectionMode === 'odd' ? oddMaximum : evenMaximum,
+    candidatePool,
+    selectedCount,
+    minimumCount,
+    anchors,
+    optionalPool,
+    optionalCount,
+    gcdSafeguard,
+    seed: randomSeed,
+    scope: randomScope,
+    normalization,
+  }), [selectionMode, harmonics, oddMaximum, evenMaximum, candidatePool, selectedCount, minimumCount, anchors, optionalPool, optionalCount, gcdSafeguard, randomSeed, randomScope, normalization]);
+  const selectionPlanState = useMemo(() => {
+    try {
+      const events = sourceEvents.length ? sourceEvents : [{ id: 'selection-preview', ticks: 0 }];
+      return {
+        plan: createHarmonicSelectionPlan(events, harmonicSelectionSettings, barTiming),
+        error: null as string | null,
+      };
+    } catch (error) {
+      return {
+        plan: null as HarmonicSelectionPlan | null,
+        error: error instanceof Error ? error.message : 'Harmonic selection settings are invalid.',
+      };
+    }
+  }, [sourceEvents, harmonicSelectionSettings, barTiming]);
+  const selectionPlan = selectionPlanState.plan;
+  const inspectedEvent = sourceEvents.find(event => event.id === inspectedEventId) ?? sourceEvents[0] ?? null;
+  const activeHarmonics =
+    (inspectedEvent && selectionPlan?.selections[inspectedEvent.id]) ??
+    selectionPlan?.groups[0]?.harmonics ??
+    harmonics;
+
   const notify = (message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(null), 2600);
@@ -156,6 +262,7 @@ function App() {
       setSourceMidi(parsed);
       setTrackSummaries(summaries);
       setSelectedTracks(defaults);
+      setInspectedEventId(collectSourceNoteEvents(parsed, defaults)[0]?.id ?? '');
       setConversion(null);
       setFileFormat(formatNumber === 0 ? 'Type 0' : `Type ${formatNumber}`);
       notify(`Loaded ${summaries.length} track${summaries.length === 1 ? '' : 's'} locally.`);
@@ -189,15 +296,19 @@ function App() {
       notify('Select at least one track to convert.');
       return;
     }
-    if (!harmonics.length) {
-      notify('Select at least one harmonic from 2 through 8.');
+    if (selectionPlanState.error) {
+      notify(selectionPlanState.error);
+      return null;
+    }
+    if (!selectionPlan || !activeHarmonics.length) {
+      notify('Select at least one valid harmonic set.');
       return;
     }
     try {
       setBusy(true);
       const result = convertMidi(sourceMidi, {
         selectedTracks,
-        harmonics,
+        harmonics: activeHarmonics,
         a4: Number(tuning),
         bendRange: Number(bendRange),
         alpha,
@@ -220,9 +331,11 @@ function App() {
         calibrationExhaustion,
         mpe,
         programNumber: useProgramChange ? programNumber : undefined,
+        harmonicSelectionPlan: selectionPlan,
       }, file.name);
       setConversion(result);
       notify(`Converted ${result.noteCount} harmonic notes across ${result.outputTrackCount} tracks.`);
+      return result;
     } catch (error) {
       notify(error instanceof Error ? error.message : 'MIDI conversion failed.');
     } finally {
@@ -231,13 +344,11 @@ function App() {
   };
 
   const exportMidi = () => {
-    if (!conversion) {
-      convertCurrentMidi();
-      return;
-    }
-    downloadBytes(midiToBytes(conversion.midi), conversion.outputFileName);
-    const sidecar = new TextEncoder().encode(settingsSidecar(conversion));
-    downloadBytes(sidecar, conversion.outputFileName.replace(/\.mid$/i, '.json'), 'application/json');
+    const current = convertCurrentMidi();
+    if (!current) return;
+    downloadBytes(midiToBytes(current.midi), current.outputFileName);
+    const sidecar = new TextEncoder().encode(settingsSidecar(current));
+    downloadBytes(sidecar, current.outputFileName.replace(/\.mid$/i, '.json'), 'application/json');
     notify('Downloaded the new MIDI file and settings sidecar.');
   };
 
@@ -249,12 +360,16 @@ function App() {
     try {
       const blob = await renderPreviewWav(sourceMidi, {
         tracks: selectedTracks,
-        harmonics,
+        harmonics: activeHarmonics,
         alpha,
         a4: Number(tuning),
         variant: ab === 'A' ? 'original' : ab === 'R' ? 'reference' : 'absent',
         soloHarmonic,
         mutedHarmonics,
+        selectionPlan: selectionPlan ?? undefined,
+        customDb: weightPreset === 'Custom' ? customDb : undefined,
+        normalization,
+        rangePolicy,
         loopStartSec: loopPreview ? Number(loopStartSec) : undefined,
         loopEndSec: loopPreview ? Number(loopEndSec) || sourceMidi.duration : undefined,
         gain: gain / 100,
@@ -298,12 +413,16 @@ function App() {
     }
     const options = {
       tracks: selectedTracks,
-      harmonics,
+       harmonics: activeHarmonics,
       alpha,
       a4: Number(tuning),
       variant: (ab === 'A' ? 'original' : ab === 'R' ? 'reference' : 'absent') as PreviewVariant,
       soloHarmonic,
       mutedHarmonics,
+      selectionPlan: selectionPlan ?? undefined,
+      customDb: weightPreset === 'Custom' ? customDb : undefined,
+      normalization,
+      rangePolicy,
       loop: loopPreview,
       loopStartSec: loopPreview ? Number(loopStartSec) : undefined,
       loopEndSec: loopPreview ? Number(loopEndSec) || sourceMidi.duration : undefined,
@@ -328,9 +447,12 @@ function App() {
       previewRef.current?.stop();
       previewRef.current = null;
     };
-  }, [playing, sourceMidi, selectedTracks, harmonics, alpha, tuning, ab, soloHarmonic, mutedHarmonics, gain, loopPreview, loopStartSec, loopEndSec]);
+  }, [playing, sourceMidi, selectedTracks, activeHarmonics, alpha, tuning, ab, soloHarmonic, mutedHarmonics, gain, loopPreview, loopStartSec, loopEndSec, selectionPlan, customDb, weightPreset, normalization, rangePolicy]);
 
-  const toggleHarmonic = (n: number) => setHarmonics(current => current.includes(n) ? current.filter(value => value !== n) : [...current, n].sort((a, b) => a - b));
+  const toggleHarmonic = (n: number) => {
+    setSelectionMode('custom');
+    setHarmonics(current => current.includes(n) ? current.filter(value => value !== n) : [...current, n].sort((a, b) => a - b));
+  };
   const selectedTrackToggle = (index: number) => setSelectedTracks(current => current.includes(index) ? current.filter(item => item !== index) : [...current, index].sort((a, b) => a - b));
   const weightForUi = (harmonic: number) => weightPreset === 'Custom'
     ? weightFromDecibels(customDb[harmonic] ?? 0)
