@@ -24,6 +24,12 @@ To build the static app and its offline service worker:
 pnpm --filter @workspace/absent-note-converter run build
 ```
 
+## GitHub Pages publishing
+
+The `Deploy Absent Note Converter to GitHub Pages` workflow deploys the static app whenever `main` is pushed. It can also be started manually from the repository's **Actions** tab. Before the first deployment, set **Settings → Pages → Build and deployment → Source** to **GitHub Actions**.
+
+The deployment uses GitHub Actions' built-in token; it does not need a personal access token. If Replit cannot push the workflow file because the GitHub connection lacks workflow permission, use a short-lived fine-grained token restricted to this repository with **Contents: Read and write** and **Workflows: Read and write**. Add it through Replit Secrets, use it only for the push, then remove the secret and revoke the token. Never commit the token or put it in this workflow.
+
 The app has no backend, account system, analytics, or runtime CDN dependency. The demo MIDI and app-shell assets are bundled with the application.
 
 ## Install and use offline
