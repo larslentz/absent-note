@@ -589,6 +589,7 @@ function App() {
   };
 
   return (
+    <div className="warm-amber-frame">
     <div className="studio">
       <header className="topbar">
         <div className="brand">
@@ -936,6 +937,7 @@ function App() {
         </div>
       </main>
       {toast && <div className="toast-note" role="status" data-testid="status-toast"><Check size={13} style={{verticalAlign:'-2px', marginRight:7}} />{toast}<button type="button" onClick={() => setToast(null)} aria-label="Dismiss notification" style={{background:'none',border:0,color:'inherit',marginLeft:12,padding:0}}><X size={12} /></button></div>}
+    </div>
     </div>
   );
 }
