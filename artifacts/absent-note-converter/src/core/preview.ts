@@ -28,6 +28,8 @@ export type PreviewOptions = {
   customDb?: Record<number, number>;
   normalization?: "off" | "sum-squares";
   rangePolicy?: RangePolicy;
+  flattenDynamics?: boolean;
+  globalVelocityScale?: number;
 };
 
 export type PreviewVoice = {
@@ -51,12 +53,13 @@ export function buildPreviewVoices(midi: Midi, options: PreviewOptions) {
   midi.tracks.forEach((track, trackIndex) => {
     if (!selectedTracks.has(trackIndex)) return;
     for (const [noteIndex, note] of track.notes.entries()) {
+      const dynamics = Math.min(1, (options.flattenDynamics ? 90 / 127 : note.velocity) * (options.globalVelocityScale ?? 1));
       if (options.variant === "original") {
         voices.push({
           frequency: midiToFrequency(note.midi, options.a4),
           start: note.time,
           duration: note.duration,
-          amplitude: note.velocity * (options.gain ?? 1),
+          amplitude: dynamics * (options.gain ?? 1),
           harmonic: 1,
           sourceNote: note.midi,
         });
@@ -85,7 +88,7 @@ export function buildPreviewVoices(midi: Midi, options: PreviewOptions) {
           frequency: harmonicFrequency(note.midi, harmonic, options.a4),
           start: note.time,
           duration: note.duration,
-          amplitude: note.velocity *
+          amplitude: dynamics *
             weight *
             (options.gain ?? 1) /
             (options.normalization === "sum-squares" ? sumSquares || 1 : 1),
@@ -98,7 +101,7 @@ export function buildPreviewVoices(midi: Midi, options: PreviewOptions) {
           frequency: midiToFrequency(note.midi, options.a4),
           start: note.time,
           duration: note.duration,
-          amplitude: note.velocity * 0.08 * (options.gain ?? 1),
+          amplitude: dynamics * 0.08 * (options.gain ?? 1),
           harmonic: 1,
           sourceNote: note.midi,
         });

@@ -115,7 +115,7 @@ function PianoRoll({ midi, selectedTracks, harmonics, selectionPlan }: {
         const width = Math.max(2, (note.duration / duration) * 584);
         return <rect key={`${note.midi}-${note.time}-${note.harmonic}-${index}`} x={x} y={y} width={width} height={Math.max(2, 134 / range - 1)} rx="1" fill={note.source ? 'none' : colors[note.harmonic]} stroke={note.source ? '#69747d' : colors[note.harmonic]} strokeWidth={note.source ? '1' : '0'} opacity={note.source ? '.65' : '.82'} />;
       })}
-      {!sourceNotes.length && <text x="325" y="72" textAnchor="middle" fill="#67757d" fontSize="9" fontFamily="DM Mono">IMPORT A MIDI FILE TO VIEW NOTES</text>}
+      {!sourceEvents.length && <text x="325" y="72" textAnchor="middle" fill="#67757d" fontSize="9" fontFamily="DM Mono">IMPORT A MIDI FILE TO VIEW NOTES</text>}
       <text x="590" y="127" textAnchor="end" fill="#56636a" fontSize="6.5" fontFamily="DM Mono">bars →</text>
     </svg>
   );
@@ -238,6 +238,11 @@ function App() {
     (inspectedEvent && selectionPlan?.selections[inspectedEvent.id]) ??
     selectionPlan?.groups[0]?.harmonics ??
     harmonics;
+  const plannedHarmonics = [...new Set(Object.values(selectionPlan?.selections ?? {}).flat())].sort((a, b) => a - b);
+  const randomMode = selectionMode.endsWith('random');
+  const activeGcd = greatestCommonDivisor(activeHarmonics);
+  const validTuning = Number.isFinite(Number(tuning)) && Number(tuning) > 0;
+  const displayTuning = validTuning ? Number(tuning) : 440;
 
   const notify = (message: string) => {
     setToast(message);
@@ -287,14 +292,14 @@ function App() {
     }
   };
 
-  const convertCurrentMidi = () => {
+  const convertCurrentMidi = (): ConversionResult | null => {
     if (!sourceMidi || !file) {
       notify('Import a MIDI file before converting.');
-      return;
+      return null;
     }
     if (!selectedTracks.length) {
       notify('Select at least one track to convert.');
-      return;
+      return null;
     }
     if (selectionPlanState.error) {
       notify(selectionPlanState.error);
@@ -302,7 +307,7 @@ function App() {
     }
     if (!selectionPlan || !activeHarmonics.length) {
       notify('Select at least one valid harmonic set.');
-      return;
+      return null;
     }
     try {
       setBusy(true);
@@ -338,6 +343,7 @@ function App() {
       return result;
     } catch (error) {
       notify(error instanceof Error ? error.message : 'MIDI conversion failed.');
+      return null;
     } finally {
       setBusy(false);
     }
@@ -357,6 +363,7 @@ function App() {
       notify('Import a MIDI file before rendering audio.');
       return;
     }
+    if (selectionPlanState.error) { notify(selectionPlanState.error); return; }
     try {
       const blob = await renderPreviewWav(sourceMidi, {
         tracks: selectedTracks,
@@ -370,6 +377,8 @@ function App() {
         customDb: weightPreset === 'Custom' ? customDb : undefined,
         normalization,
         rangePolicy,
+        flattenDynamics: !preserveDynamics,
+        globalVelocityScale,
         loopStartSec: loopPreview ? Number(loopStartSec) : undefined,
         loopEndSec: loopPreview ? Number(loopEndSec) || sourceMidi.duration : undefined,
         gain: gain / 100,
@@ -411,6 +420,11 @@ function App() {
       previewRef.current = null;
       return;
     }
+    if (!selectionPlan) {
+      setPlaying(false);
+      notify(selectionPlanState.error ?? 'Choose a valid harmonic set.');
+      return;
+    }
     const options = {
       tracks: selectedTracks,
        harmonics: activeHarmonics,
@@ -423,6 +437,8 @@ function App() {
       customDb: weightPreset === 'Custom' ? customDb : undefined,
       normalization,
       rangePolicy,
+      flattenDynamics: !preserveDynamics,
+      globalVelocityScale,
       loop: loopPreview,
       loopStartSec: loopPreview ? Number(loopStartSec) : undefined,
       loopEndSec: loopPreview ? Number(loopEndSec) || sourceMidi.duration : undefined,
@@ -447,7 +463,7 @@ function App() {
       previewRef.current?.stop();
       previewRef.current = null;
     };
-  }, [playing, sourceMidi, selectedTracks, activeHarmonics, alpha, tuning, ab, soloHarmonic, mutedHarmonics, gain, loopPreview, loopStartSec, loopEndSec, selectionPlan, customDb, weightPreset, normalization, rangePolicy]);
+  }, [playing, sourceMidi, selectedTracks, activeHarmonics, alpha, tuning, ab, soloHarmonic, mutedHarmonics, gain, loopPreview, loopStartSec, loopEndSec, selectionPlan, customDb, weightPreset, normalization, rangePolicy, preserveDynamics, globalVelocityScale]);
 
   const toggleHarmonic = (n: number) => {
     setSelectionMode('custom');
@@ -475,7 +491,7 @@ function App() {
     }
     const keys = [...new Set(sourceMidi.tracks.flatMap((track, index) =>
       selectedTracks.includes(index)
-        ? track.notes.flatMap(note => harmonics.map(h => note.midi + harmonicOffset(h).semitones).filter(key => key <= 127))
+        ? track.notes.flatMap(note => plannedHarmonics.map(h => note.midi + harmonicOffset(h).semitones).filter(key => key <= 127))
         : [],
     ))].sort((a, b) => a - b);
     if (!keys.length) {
@@ -645,18 +661,46 @@ function App() {
 
             <article className="panel">
               <div className="panel-head">
-                <h2 className="panel-title"><span className="section-number">02</span><SlidersHorizontal size={15} /> Harmonic construction</h2>
+                <h2 className="panel-title"><span className="section-number">02</span><SlidersHorizontal size={15} /> Harmonic-Layer Selection</h2>
                 <span className="panel-kicker">PARTIALS · k × f₀</span>
               </div>
               <div className="panel-body">
                 <div className="control-layout">
                   <div className="control-block">
-                    <div className="control-label"><span>Harmonic set</span><span>{harmonics.length} selected</span></div>
-                    <div className="harmonics" role="group" aria-label="Choose harmonics">
-                      {[2,3,4,5,6,7,8].map(n => <button type="button" className={`harmonic ${harmonics.includes(n) ? 'active' : ''}`} key={n} onClick={() => toggleHarmonic(n)} aria-pressed={harmonics.includes(n)} data-testid={`button-harmonic-${n}`}>{n}</button>)}
-                    </div>
-                    <div className="hint">The fundamental (k = 1) is omitted. Default set: 2–5.</div>
-                    <div className="formula" data-testid="text-harmonic-formula">f<sub>out</sub> = k × f<sub>0</sub> <strong>· k ∈ {'{'}{harmonics.length ? harmonics.join(', ') : '—'}{'}'}</strong></div>
+                    <label className="control-label" htmlFor="selection-mode">Selection mode</label>
+                    <select id="selection-mode" className="select" value={selectionMode} onChange={event => setSelectionMode(event.target.value as HarmonicSelectionMode)} data-testid="select-harmonic-mode">
+                      <option value="reference">Reference · 2, 3, 4, 5</option><option value="odd">Odd only</option><option value="even">Even only</option><option value="constrained-random">Constrained random</option><option value="anchored-random">Anchored random</option><option value="free-random">Free random · experimental</option><option value="custom">Custom</option>
+                    </select>
+                    {(selectionMode === 'odd' || selectionMode === 'even') && <label className="selection-field">Maximum harmonic<input className="text-input" type="number" min={selectionMode === 'odd' ? 3 : 2} max="16" value={selectionMode === 'odd' ? oddMaximum : evenMaximum} onChange={event => (selectionMode === 'odd' ? setOddMaximum : setEvenMaximum)(Number(event.target.value))} /></label>}
+                    {selectionMode === 'custom' && <HarmonicChooser values={SUPPORTED_HARMONICS} selected={harmonics} onToggle={toggleHarmonic} testPrefix="button-harmonic" />}
+                    {(selectionMode === 'constrained-random' || selectionMode === 'free-random') && <>
+                      <div className="control-label">Candidate pool</div>
+                      <HarmonicChooser values={SUPPORTED_HARMONICS} selected={candidatePool} onToggle={h => setCandidatePool(current => current.includes(h) ? current.filter(n => n !== h) : [...current, h].sort((a,b) => a-b))} testPrefix="candidate" />
+                      <label className="selection-field">Selected count<input className="text-input" type="number" min="1" max="15" value={selectedCount} onChange={event => setSelectedCount(Number(event.target.value))} /></label>
+                      {selectionMode === 'constrained-random' && <label className="selection-field">Minimum count<input className="text-input" type="number" min="1" max="15" value={minimumCount} onChange={event => setMinimumCount(Number(event.target.value))} /></label>}
+                    </>}
+                    {selectionMode === 'anchored-random' && <>
+                      <div className="control-label">Always retain anchors</div>
+                      <HarmonicChooser values={SUPPORTED_HARMONICS} selected={anchors} onToggle={h => setAnchors(current => current.includes(h) ? current.filter(n => n !== h) : [...current, h].sort((a,b) => a-b))} testPrefix="anchor" />
+                      <div className="control-label">Optional pool · anchors excluded automatically</div>
+                      <HarmonicChooser values={SUPPORTED_HARMONICS} selected={optionalPool} onToggle={h => setOptionalPool(current => current.includes(h) ? current.filter(n => n !== h) : [...current, h].sort((a,b) => a-b))} testPrefix="optional" />
+                      <label className="selection-field">Optional count<input className="text-input" type="number" min="0" max="15" value={optionalCount} onChange={event => setOptionalCount(Number(event.target.value))} /></label>
+                      <label className="loop-toggle"><input type="checkbox" checked={gcdSafeguard} onChange={event => setGcdSafeguard(event.target.checked)} /> Require GCD = 1</label>
+                    </>}
+                    {randomMode && <>
+                      <label className="selection-field">Seed<input className="text-input" value={randomSeed} onChange={event => setRandomSeed(event.target.value)} data-testid="input-random-seed" /></label>
+                      <button className="btn btn-small" type="button" onClick={() => { const bytes = new Uint32Array(4); crypto.getRandomValues(bytes); setRandomSeed(Array.from(bytes, n => n.toString(16)).join('-')); }} data-testid="button-new-seed">New seed</button>
+                      <label className="selection-field">Randomization scope<select className="select" value={randomScope} onChange={event => setRandomScope(event.target.value as RandomizationScope)} data-testid="select-random-scope"><option value="conversion">Once per conversion</option><option value="source-note">Per source note event</option><option value="bar" disabled={!barTiming.supported}>Per bar</option></select></label>
+                      {!barTiming.supported && <div className="warn-box">{barTiming.reason} Per-bar selection is disabled.</div>}
+                      <div className="hint">Sets are chosen at note-on and held through note-off. Count constraints are practical defaults, not guarantees of perceptual success.</div>
+                    </>}
+                    {selectionMode === 'even' && <div className="warn-box">Even-only sets favor a harmonic base above the source pitch, commonly one octave higher. This mode is not intended to reliably preserve the source pitch.</div>}
+                    {selectionMode === 'free-random' && <div className="warn-box">Experimental and potentially pitch-ambiguous. No GCD safeguard is applied.</div>}
+                    {selectionPlanState.error && <div className="warn-box" role="alert">{selectionPlanState.error}</div>}
+                    <div className="formula" data-testid="text-harmonic-formula">f<sub>out</sub> = h × f<sub>0</sub> <strong>· h ∈ {'{'}{activeHarmonics.join(', ')}{'}'}</strong></div>
+                    <div className="hint">Harmonic 1 is never generated. Selected-set GCD: <strong>{activeGcd}</strong> · base multiplier {activeGcd}× · interval +{activeGcd ? (12 * Math.log2(activeGcd)).toFixed(5) : '—'} semitones.</div>
+                    <div className={activeGcd > 1 ? 'warn-box' : 'hint'}>{activeGcd > 1 ? `These selected components form a harmonic series based on ${activeGcd} × the source frequency. The perceived pitch may shift.` : 'No higher common integer harmonic base detected. This does not guarantee perception of the source pitch.'}</div>
+                    {randomMode && selectionPlan && <div className="hint">Generated groups: {summarizeGcdGroups(selectionPlan.groups).map(group => `${group.count} with GCD ${group.gcd} (${group.baseMultiplier}×, +${group.intervalSemitones.toFixed(5)} st)`).join('; ')}.</div>}
                   </div>
                   <div className="control-block">
                     <div className="control-label"><span>Harmonic weighting</span><span>{weightPreset === 'Custom' ? 'custom dB' : `α = ${alpha.toFixed(1)}`}</span></div>
@@ -667,8 +711,8 @@ function App() {
                     <div className="hint">wₕ = (2 / h)<sup>α</sup>. Equal α = 0, Gentle α = 0.5, Strong α = 1.</div>
                     <div className="formula-table" data-testid="table-harmonics">
                       <div className="formula-row formula-header"><span>H</span><span>OFFSET</span><span>CENTS</span><span>BEND / SIGNED</span><span>LEVEL</span></div>
-                      {harmonics.map(harmonic => { const offset = harmonicOffset(harmonic); const bend = pitchBendForCents(offset.cents, Number(bendRange)); const weight = weightForUi(harmonic); return <div className="formula-row" key={harmonic}><span>H{harmonic}</span><span>+{offset.semitones}</span><span>{offset.cents >= 0 ? '+' : ''}{offset.cents.toFixed(3)}¢</span><span>{bend.value14Bit} / {bend.signed >= 0 ? '+' : ''}{bend.signed}</span><span>{layerLevelDb(weight).toFixed(1)} dB</span></div>; })}
-                      {weightPreset === 'Custom' && harmonics.map(harmonic => <div className="custom-weight-row" key={`custom-${harmonic}`}><label htmlFor={`custom-db-${harmonic}`}>H{harmonic} custom level</label><input id={`custom-db-${harmonic}`} className="text-input" type="number" min="-60" max="12" step="0.1" value={customDb[harmonic] ?? 0} onChange={event => setCustomDb(current => ({ ...current, [harmonic]: Number(event.target.value) }))} data-testid={`input-custom-db-${harmonic}`} /><span>dB</span></div>)}
+                      {activeHarmonics.map(harmonic => { const offset = harmonicOffset(harmonic); const bend = pitchBendForCents(offset.cents, Number(bendRange)); const weight = weightForUi(harmonic); return <div className="formula-row" key={harmonic}><span>H{harmonic}</span><span>+{offset.semitones}</span><span>{offset.cents >= 0 ? '+' : ''}{offset.cents.toFixed(3)}¢</span><span>{bend.value14Bit} / {bend.signed >= 0 ? '+' : ''}{bend.signed}</span><span>{layerLevelDb(weight).toFixed(1)} dB</span></div>; })}
+                      {weightPreset === 'Custom' && plannedHarmonics.map(harmonic => <div className="custom-weight-row" key={`custom-${harmonic}`}><label htmlFor={`custom-db-${harmonic}`}>H{harmonic} custom level</label><input id={`custom-db-${harmonic}`} className="text-input" type="number" min="-60" max="12" step="0.1" value={customDb[harmonic] ?? 0} onChange={event => setCustomDb(current => ({ ...current, [harmonic]: Number(event.target.value) }))} data-testid={`input-custom-db-${harmonic}`} /><span>dB</span></div>)}
                     </div>
                     <div className="control-label" style={{marginTop:15}}><span>Range policy</span></div>
                     <select className="select" value={rangePolicy} onChange={event => setRangePolicy(event.target.value as 'skip-harmonic' | 'drop-source')} data-testid="select-range-policy">
@@ -677,6 +721,26 @@ function App() {
                   </div>
                 </div>
                 <div className="warn-box" data-testid="warning-harmonics"><Info size={13} /><span>Higher partials can exceed MIDI 127. Policy: <strong>{rangePolicy === 'skip-harmonic' ? 'skip only the affected harmonic' : 'drop the whole source note'}</strong>. Notes are never octave-wrapped.</span></div>
+                <div className="event-inspector" data-testid="event-inspector">
+                  <label className="control-label" htmlFor="event-inspector">Source event inspector</label>
+                  <select id="event-inspector" className="select" value={inspectedEvent?.id ?? ''} onChange={event => setInspectedEventId(event.target.value)} disabled={!sourceEvents.length}>
+                    {!sourceEvents.length && <option value="">Import MIDI to inspect source events</option>}
+                    {sourceEvents.map(event => <option key={event.id} value={event.id}>Track {event.trackIndex + 1} · tick {event.ticks} · MIDI {event.midi} · note {event.noteIndex + 1}</option>)}
+                  </select>
+                  {inspectedEvent && <>
+                    <div className="hint">Source MIDI {inspectedEvent.midi} · f₀ = {validTuning ? midiToFrequency(inspectedEvent.midi, displayTuning).toFixed(3) : 'invalid tuning'} Hz · ID: {inspectedEvent.id}</div>
+                    <div className="hint">Ideal target frequencies and fixed-layer corrections below. Calibration may apply different corrections to match the measured instrument.</div>
+                    {activeHarmonics.map(h => { const offset = harmonicOffset(h); const output = inspectedEvent.midi + offset.semitones; const dropped = output > 127 || (rangePolicy === 'drop-source' && activeHarmonics.some(k => inspectedEvent.midi + harmonicOffset(k).semitones > 127)); return <div className="inspector-row" key={h}>H{h} → MIDI {output} · {offset.cents.toFixed(3)}¢ · {validTuning ? (midiToFrequency(inspectedEvent.midi, displayTuning) * h).toFixed(2) : '—'} Hz · weight {weightForUi(h).toFixed(4)} {dropped ? '· SKIPPED: MIDI range policy' : ''}</div>; })}
+                    {(() => { const remaining = activeHarmonics.filter(h => inspectedEvent.midi + harmonicOffset(h).semitones <= 127); const actual = rangePolicy === 'drop-source' && remaining.length !== activeHarmonics.length ? [] : remaining; return actual.length !== activeHarmonics.length ? <div className="warn-box">Effective set after range policy: {'{'}{actual.join(', ')}{'}'} · GCD {greatestCommonDivisor(actual)}. Normalization uses only remaining layers; this differs from the requested set.</div> : null; })()}
+                    {conversion && <details><summary className="hint">Last-conversion MIDI events at this onset (may reflect earlier settings)</summary>
+                      {conversion.midi.tracks.flatMap((track, index) => track.notes.filter(note => note.ticks === inspectedEvent.ticks && (conversion.harmonicSelectionPlan.selections[inspectedEvent.id] ?? []).some(h => inspectedEvent.midi + harmonicOffset(h).semitones === note.midi)).map((note, noteIndex) => {
+                        const bends = track.pitchBends.filter(bend => bend.ticks <= note.ticks);
+                        const cents = (bends[bends.length - 1]?.value ?? 0) * (conversion.settings.bendRange ?? 2) * 100;
+                        return <div key={`${index}-${noteIndex}`} className="inspector-row">Channel {track.channel + 1} · MIDI {note.midi} · applied bend {cents.toFixed(3)}¢ · velocity {Math.round(note.velocity * 127)} · duration {note.durationTicks} ticks</div>;
+                      }))}
+                    </details>}
+                  </>}
+                </div>
               </div>
             </article>
 
@@ -736,7 +800,7 @@ function App() {
                     <button className={`tool-button ${ab === 'A' ? 'active' : ''}`} type="button" aria-label="Play original melody as sines" onClick={() => setAb('A')} data-testid="button-ab-a">A</button>
                     <button className={`tool-button ${ab === 'B' ? 'active' : ''}`} type="button" aria-label="Play absent harmonics" onClick={() => setAb('B')} data-testid="button-ab-b">B</button>
                     <button className={`tool-button ${ab === 'R' ? 'active' : ''}`} type="button" aria-label="Play absent harmonics with quiet fundamental reference" onClick={() => setAb('R')} data-testid="button-ab-reference">R</button>
-                    <button className={`tool-button ${soloHarmonic ? 'active' : ''}`} type="button" aria-label={soloHarmonic ? `Clear H${soloHarmonic} solo` : 'Solo the first selected harmonic'} onClick={() => setSoloHarmonic(soloHarmonic ? null : harmonics[0] ?? null)} data-testid="button-solo"><Volume2 size={13} /></button>
+                    <button className={`tool-button ${soloHarmonic ? 'active' : ''}`} type="button" aria-label={soloHarmonic ? `Clear H${soloHarmonic} solo` : 'Solo the first selected harmonic'} onClick={() => setSoloHarmonic(soloHarmonic ? null : activeHarmonics[0] ?? null)} data-testid="button-solo"><Volume2 size={13} /></button>
                   </div>
                 </div>
                 <div className="loop-controls">
@@ -745,15 +809,17 @@ function App() {
                   <label>End s <input className="text-input" type="number" min="0" step="0.1" value={loopEndSec} placeholder={sourceMidi?.duration.toFixed(1) ?? 'end'} onChange={event => setLoopEndSec(event.target.value)} disabled={!loopPreview} data-testid="input-loop-end" /></label>
                 </div>
                 <div className="visual-caption"><span>PIANO ROLL · {ab === 'A' ? 'ORIGINAL' : ab === 'R' ? 'ABSENT + REFERENCE' : 'ABSENT'} / {soloHarmonic ? `H${soloHarmonic} SOLO` : 'FULL MIX'}</span><span>{sourceMidi ? `${sourceMidi.header.ppq} PPQ` : 'BAR —'}</span></div>
-                <div className="piano-wrap"><PianoRoll midi={sourceMidi} selectedTracks={selectedTracks} harmonics={harmonics} /></div>
-                <div className="note-legend"><span><i className="legend-dot" />Source notes</span><span><i className="legend-dot out" />Harmonic output</span><span className="unit">{sourceMidi ? `${harmonics.length} layers` : 'No MIDI loaded'}</span></div>
-                <div className="preview-layers" data-testid="controls-preview-layers">{harmonics.map(harmonic => <button type="button" key={harmonic} className={`layer-chip ${mutedHarmonics.includes(harmonic) ? 'muted' : ''} ${soloHarmonic === harmonic ? 'soloed' : ''}`} onClick={() => setMutedHarmonics(current => current.includes(harmonic) ? current.filter(item => item !== harmonic) : [...current, harmonic])} onContextMenu={event => { event.preventDefault(); setSoloHarmonic(soloHarmonic === harmonic ? null : harmonic); }} title={`Click to ${mutedHarmonics.includes(harmonic) ? 'unmute' : 'mute'} H${harmonic}; right-click to solo`} data-testid={`button-preview-layer-${harmonic}`}>H{harmonic} {mutedHarmonics.includes(harmonic) ? 'muted' : 'on'}</button>)}</div>
-                <div className="visual-caption" style={{marginTop:17}}><span>HARMONIC SPECTRUM</span><span>AMPLITUDE · NORMALIZED</span></div>
+                <div className="piano-wrap"><PianoRoll midi={sourceMidi} selectedTracks={selectedTracks} harmonics={activeHarmonics} selectionPlan={selectionPlan} /></div>
+                <div className="note-legend"><span><i className="legend-dot" />Source notes</span><span><i className="legend-dot out" />Harmonic output</span><span className="unit">{sourceMidi ? `${activeHarmonics.length} inspected layers` : 'No MIDI loaded'}</span></div>
+                <div className="preview-layers" data-testid="controls-preview-layers">{plannedHarmonics.map(harmonic => <button type="button" key={harmonic} className={`layer-chip ${mutedHarmonics.includes(harmonic) ? 'muted' : ''} ${soloHarmonic === harmonic ? 'soloed' : ''}`} onClick={() => setMutedHarmonics(current => current.includes(harmonic) ? current.filter(item => item !== harmonic) : [...current, harmonic])} onContextMenu={event => { event.preventDefault(); setSoloHarmonic(soloHarmonic === harmonic ? null : harmonic); }} title={`Click to ${mutedHarmonics.includes(harmonic) ? 'unmute' : 'mute'} H${harmonic}; right-click to solo`} data-testid={`button-preview-layer-${harmonic}`}>H{harmonic} {mutedHarmonics.includes(harmonic) ? 'muted' : 'on'}</button>)}</div>
+                <div className="visual-caption" style={{marginTop:17}}><span>INSPECTED HARMONIC WEIGHTS</span><span>ILLUSTRATIVE</span></div>
                 <div className="spectrum" role="img" aria-label="Illustrative spectrum placeholder">
-                  {(sourceMidi ? harmonics : [2,3,4,5]).map(harmonic => { const weight = harmonicWeight(harmonic, alpha); const height = Math.max(3, Math.min(100, weight * 78)); return <div key={harmonic} className="spectrum-bar" title={`H${harmonic}: ${layerLevelDb(weight).toFixed(1)} dB`} style={{height:`${height}%`,opacity: .85}} />; })}
+                  {activeHarmonics.map(harmonic => { const weight = weightForUi(harmonic); const height = Math.max(3, Math.min(100, weight * 78)); return <div key={harmonic} className="spectrum-bar" title={`H${harmonic}: ${layerLevelDb(weight).toFixed(1)} dB`} style={{height:`${height}%`,opacity: .85}} />; })}
                 </div>
                 <div className="spectrum-labels"><span>f₀</span><span>2f₀</span><span>3f₀</span><span>4f₀</span><span>5f₀</span><span>→ frequency</span></div>
-                <div className="hint">Preview uses exact-frequency sine oscillators, matching envelopes, automatic headroom and a limiter. The spectrum bars show selected layer weighting.</div>
+                <div className="hint">Preview uses exact-frequency sine oscillators and matching envelopes. No automatic peak limiter is used. Spectrum bars show the inspected set’s weights, not measured audio.</div>
+                <label className="selection-field">Sine preview normalization<select className="select" value={normalization} onChange={event => setNormalization(event.target.value as typeof normalization)} data-testid="select-normalization"><option value="off">Off</option><option value="sum-squares">Constant sum-of-squares amplitude — sine preview</option></select></label>
+                <div className="hint">This preserves summed squared sine amplitudes, not exact perceived loudness or peak level. Leave output headroom. Source-note dynamics multiply the entire group separately. Mute/solo does not rebalance other layers. Excess output can clip playback or WAV export.</div>
                 <div className="control-label" style={{marginTop:12}}><span>Master preview gain</span><span>{gain}%</span></div>
                 <div className="range-row"><input aria-label="Master preview gain" type="range" min="0" max="100" value={gain} onChange={event => setGain(Number(event.target.value))} data-testid="input-preview-gain" /><span className="range-value">{gain}</span></div>
                 <div className="warn-box"><Info size={13} /><span>Each harmonic has its own MIDI channel because pitch bend is channel-wide. Chords are supported in fixed-tuning mode.</span></div>
@@ -768,7 +834,7 @@ function App() {
               <div className="panel-body">
                 <div className="calibration">
                   <div className="cal-top"><div className="cal-title">Compensate for instrument tuning</div><Toggle checked={calibrationEnabled} onChange={() => setCalibrationEnabled(!calibrationEnabled)} label="Enable piano calibration" testId="switch-calibration" /></div>
-                    <p className="cal-desc">MIDI cannot reshape a piano’s internal partials. Calibration can adapt level and fundamental tuning, but a piano will not behave like pure sines.</p>
+                    <p className="cal-desc">Harmonic-layer selection chooses which generated MIDI notes are played. With piano or other complex instruments, each note contains additional partials. Selecting odd or even layers does not create a strictly odd-only or even-only audio spectrum. Use sine preview to audition the idealized harmonic structure.</p>
                     <div className="cal-controls">
                       <button type="button" className="btn btn-small" onClick={generateCalibrationFiles} data-testid="button-generate-calibration"><Music2 size={12} /> Generate test MIDI + schedule</button>
                       <button type="button" className="btn btn-small" onClick={() => calibrationWavInput.current?.click()} data-testid="button-upload-calibration-wav"><Upload size={12} /> Analyze WAV</button>
@@ -843,6 +909,8 @@ function App() {
                   </div>
                 </div>
                 <div className="export-note">Standard MIDI File type 1 · JSON settings sidecar · 48 kHz / 24-bit WAV · original source is never modified</div>
+                <div className="hint" data-testid="selection-report">Current plan: {selectionMode} · pool {'{'}{candidatePool.join(', ')}{'}'}{selectionMode === 'anchored-random' ? ` · anchors {${anchors.join(', ')}} · optional {${optionalPool.join(', ')}}` : ''} · seed {randomSeed} · scope {randomScope}. MIDI retains the existing velocity/gain strategy; exact audio layer gains depend on the receiving instrument and are not encoded as constant energy.</div>
+                {conversion && <div className="hint">Last conversion: {conversion.harmonicSelectionPlan.settings.mode} · {summarizeGcdGroups(conversion.harmonicSelectionPlan.groups).map(group => `${group.count} effective groups: GCD ${group.gcd}, base ${group.baseMultiplier}×`).join('; ')} · {Object.values(conversion.harmonicSelectionPlan.skippedLayers).reduce((count, layers) => count + layers.length, 0)} skipped layers. Full source-event selections and allocation warnings are included in the JSON report.</div>}
                 {conversion && (conversion.warnings.length
                   ? <div className="warn-box warning-list" data-testid="panel-conversion-warnings"><Info size={13} /><div><strong>{conversion.warnings.length} conversion warning(s)</strong>{conversion.warnings.map((warning, index) => <div className="warning-row" key={`${warning.type}-${index}`}>{warning.message}{warning.trackIndex !== undefined ? ` Track ${warning.trackIndex + 1}.` : ''}{warning.bar !== undefined ? ` Bar ${warning.bar}, beat ${warning.beat}.` : warning.ticks !== undefined ? ` Tick ${warning.ticks}.` : ''}</div>)}</div></div>
                   : <div className="warn-box" data-testid="panel-conversion-warnings"><Info size={13} /><span>No range or pitch-bend warnings.</span></div>)}

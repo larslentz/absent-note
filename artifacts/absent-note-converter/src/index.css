@@ -1,6 +1,13 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
+.harmonic-pool { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.harmonic-pool .harmonic { flex: 0 0 34px; min-width: 34px; height: 32px; }
+.selection-field { display: flex; flex-direction: column; gap: 7px; margin: 12px 0; font-size: 12px; color: #96a2a9; }
+.event-inspector { margin-top: 18px; border-top: 1px solid #354047; padding-top: 14px; min-width: 0; }
+.event-inspector .hint { overflow-wrap: anywhere; }
+.inspector-row { font-family: monospace; font-size: 11px; padding: 7px 0; border-bottom: 1px solid #354047; overflow-wrap: anywhere; }
+
 :root {
   --background: 220 19% 8%;
   --foreground: 210 18% 88%;

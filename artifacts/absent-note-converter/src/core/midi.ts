@@ -24,6 +24,7 @@ import {
   collectSourceNoteEvents,
   greatestCommonDivisor,
   sourceEventId,
+  summarizeGcdGroups,
   type HarmonicSelectionPlan,
   type HarmonicSelectionSettings,
 } from "./harmonic-selection";
@@ -70,7 +71,7 @@ export type ConversionOptions = {
 };
 
 export type ConversionWarning = {
-  type: "range" | "pitch-bend" | "channel-conflict";
+  type: "range" | "pitch-bend" | "channel-conflict" | "harmonic-base";
   message: string;
   trackIndex?: number;
   note?: number;
@@ -108,6 +109,9 @@ function assertOptions(options: ConversionOptions) {
   }
   if (new Set(options.harmonics).size !== options.harmonics.length) {
     throw new Error("Harmonic selections must be unique.");
+  }
+  if (options.harmonicSelectionPlan && Object.values(options.harmonicSelectionPlan.selections).some(set => new Set(set).size !== set.length)) {
+    throw new Error("Each source-event harmonic selection must be unique.");
   }
 }
 
@@ -407,7 +411,7 @@ export function convertMidi(
           note: note.midi,
           ticks: note.ticks,
         });
-        continue;
+        return;
       }
       for (const harmonic of eventHarmonics) {
         const offset = harmonicOffset(harmonic);
@@ -521,6 +525,11 @@ export function convertMidi(
           ticks: note.ticks,
         });
       }
+      if (harmonicSelectionPlan.settings.mode === "constrained-random" &&
+          actualForEvent.length < (harmonicSelectionPlan.settings.minimumCount ?? 3)) {
+        warnings.push({ type: "range", trackIndex, ticks: note.ticks,
+          message: "The range policy leaves fewer layers than the configured minimum count; the requested constraint cannot be retained." });
+      }
     });
   });
 
@@ -603,11 +612,44 @@ export function convertMidi(
         }
       }
     }
+    // Same-pitch overlapping notes need separate channels: a note-off otherwise
+    // terminates another source event's voice on many receiving instruments.
+    const occupiedChannels = new Set(output.tracks.map(track => track.channel));
+    if (options.preserveUnconvertedTracks ?? true) {
+      source.tracks.forEach((track, index) => { if (!selected.has(index)) occupiedChannels.add(track.channel); });
+    }
+    for (const target of outputTracks.values()) {
+      const lanes: Track[] = [target];
+      const notes = [...target.notes].sort((a, b) => a.ticks - b.ticks || a.durationTicks - b.durationTicks);
+      target.notes.length = 0;
+      for (const note of notes) {
+        let lane = lanes.find(candidate => !candidate.notes.some(existing =>
+          existing.midi === note.midi && existing.ticks < note.ticks + note.durationTicks &&
+          existing.ticks + existing.durationTicks > note.ticks));
+        if (!lane) {
+          const channel = dynamicChannels.find(candidate => !occupiedChannels.has(candidate));
+          if (channel === undefined) throw new Error("Insufficient MIDI channels to preserve overlapping same-pitch source notes. Reduce harmonics or polyphony; notes were not merged or truncated.");
+          occupiedChannels.add(channel);
+          lane = output.addTrack();
+          lane.fromJSON(target.toJSON());
+          lane.notes.length = 0;
+          lane.channel = channel;
+          lane.name = `${target.name} · overlap voice ${lanes.length + 1}`;
+          lanes.push(lane);
+          warnings.push({ type: "channel-conflict", message: `Allocated channel ${channel + 1} to preserve overlapping source-note ownership.` });
+        }
+        lane.addNote(note);
+      }
+    }
   }
 
   if (options.preserveUnconvertedTracks ?? true) {
     source.tracks.forEach((track, index) => {
       if (selected.has(index)) return;
+      if (output.tracks.some(generated => generated.channel === track.channel)) {
+        warnings.push({ type: "channel-conflict", trackIndex: index,
+          message: `Unconverted track shares channel ${track.channel + 1} with generated output. Route it to a separate instrument/port in your DAW to avoid program or bend conflicts.` });
+      }
       const passthrough = output.addTrack();
       passthrough.fromJSON(track.toJSON());
     });
@@ -657,6 +699,12 @@ export function convertMidi(
       };
     }),
   };
+  for (const group of summarizeGcdGroups(effectivePlan.groups)) {
+    if (group.gcd > 1) warnings.push({
+      type: "harmonic-base",
+      message: `${group.count} effective group(s) form a harmonic series based on ${group.gcd} × the source frequency (+${group.intervalSemitones.toFixed(5)} semitones). The perceived pitch may shift.`,
+    });
+  }
   const weightSummary = harmonics
     .map((harmonic) => {
       const weight = settingWeight(harmonic, options);
@@ -707,11 +755,14 @@ export function settingsSidecar(result: ConversionResult) {
   return JSON.stringify(
     {
       app: "Absent Note Converter",
-      version: 1,
+      version: 2,
       sourceFileName: result.outputFileName.replace(/_absent_.*$/, ""),
       outputFileName: result.outputFileName,
       parameters: result.settings,
       harmonicSelectionPlan: result.harmonicSelectionPlan,
+      generatedTracks: result.midi.toJSON().tracks,
+      audioGainNote: "Sine sum-of-squares normalization does not encode constant-energy MIDI playback. Exact audio gains depend on the receiving instrument; MIDI velocity is not universally proportional to amplitude.",
+      perceptionNote: "GCD describes mathematical harmonic relationships, not guaranteed perceived pitch. Complex instrument notes contain additional partials.",
       warnings: result.warnings,
       convertedNoteCount: result.noteCount,
       outputTrackCount: result.outputTrackCount,

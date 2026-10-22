@@ -81,11 +81,15 @@ export function allocateDynamicVoices(
         appliedCorrectionCents: request.correctionCents,
       };
     } else {
-      const nearest = [...active].sort(
+      // Sharing a bend is safe only when no active voice on that channel
+      // owns the same pitch. Otherwise either note-off can kill both voices.
+      const nearest = [...active].filter(voice => !active.some(other =>
+        other.channel === voice.channel && other.note === request.note)).sort(
         (a, b) =>
           Math.abs(a.appliedCorrectionCents - request.correctionCents) -
           Math.abs(b.appliedCorrectionCents - request.correctionCents),
       )[0];
+      if (!nearest) throw new Error("Insufficient channels to preserve overlapping same-pitch notes with nearest-correction allocation.");
       events.push({
         type: "nearest-correction",
         noteId: request.id,

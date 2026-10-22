@@ -70,11 +70,23 @@ The test case `source velocity 90, alpha 1, gamma 2` produces velocities `90, 73
 
 1. **Import:** Open the bundled short melody or select/drop a `.mid` / `.midi` file. The app parses track names, channels, note counts, pitch ranges, sustain, pitch bend, tempo, and PPQ locally. Channel 10 drums are unselected by default.
 2. **Select tracks:** Choose parts to convert. Unselected tracks can be retained in the new Type 1 file or omitted.
-3. **Harmonics and balance:** Select harmonics 2–8, choose weighting, A4 tuning, bend range, velocity mode, source-dynamics handling, sustain behavior, and range policy. Out-of-range notes are skipped or their entire source note is dropped; pitches are never folded or wrapped.
+3. **Harmonics and balance:** Choose Reference, Odd only, Even only, Constrained random, Anchored random, Free random, or Custom. Supported harmonics are 2–16; harmonic 1 is excluded. Choose weighting, A4 tuning, bend range, velocity mode, source-dynamics handling, sustain behavior, and range policy. Out-of-range notes are skipped or their entire source note is dropped; pitches are never folded or wrapped.
 4. **Preview:** Play the original melody as sines, the absent-harmonic version, or the harmonic version with a quiet fundamental reference. Solo the first selected harmonic, adjust preview gain, and export a 48 kHz / 24-bit WAV.
 5. **Optional calibration:** Generate a test MIDI and JSON schedule for the used harmonic key range. Render it through the exact piano patch at fixed gain without normalization, reverb, compression, or pedal, then analyze the resulting WAV. Save, import, and export named local profiles.
 6. **Export:** Convert to a new Standard MIDI File type 1 and download its JSON settings sidecar. The original file is never modified.
 
 Fixed-tuning conversion assigns one MIDI channel to each harmonic layer, skips channel 10, configures the pitch-bend range with RPN 0, and sends the layer correction before notes. Separate channels are necessary because MIDI pitch bend is channel-wide. Chords work in this mode because a layer’s correction depends only on the harmonic number.
+
+## Reproducible selection and level controls
+
+Random modes use a seeded PRNG and bounded enumeration of candidate subsets, not retries or unseeded conversion decisions. A shared plan associates stable source-event IDs with harmonic sets. Scope can be once per conversion, per source event, or per bar; a note keeps its onset selection through its entire duration. PPQ ticks and the time-signature map determine bars independently of tempo. Non-boundary meter changes and unsupported divisions disable per-bar selection rather than guessing.
+
+The source-event inspector shows ideal target pitches, corrections, weights, and range skips. The exported JSON includes settings, requested/effective selections, GCD groups, skipped layers, generated notes/bends/channels, and warnings. Older callers with only a fixed harmonic list retain their previous selection behavior.
+
+GCD greater than one indicates an exact harmonic base above the source frequency. GCD one is not proof of perceptual pitch preservation. Piano and other complex instruments add their own partials, so odd/even layer selection does not produce a strictly odd/even audio spectrum.
+
+Sine preview normalization is optional: weights are divided by the square root of their summed squares after range skips. Source dynamics multiply the group separately. This preserves summed squared sine amplitudes, not perceived loudness or peak level. Mute/solo does not rebalance other layers. No automatic limiter is used; leave output headroom. The existing MIDI velocity/calibration strategy remains separate and is not labeled constant energy.
+
+Overlapping same-pitch fixed-tuning voices use additional channels, preserving independent note-offs. Export stops explicitly if these channels run out. Calibrated mode retains its user-selected voice-stealing or nearest-correction policy; nearest-correction fails explicitly rather than sharing an overlapping same pitch on one channel. Passing unconverted tracks through may require separate DAW ports if they share generated channels; the report warns about this.
 
 Calibration uses the measured piano fundamental for level matching and per-key bend correction. A dynamic allocator assigns notes to the available channel pool, with a choice to steal the oldest voice or use the nearest available bend when the pool is exhausted. MPE export uses lower-zone member channels 2–16. The piano patch’s internal partials and inharmonicity cannot be reshaped by MIDI; the perceived missing-fundamental effect varies by listener and playback system.

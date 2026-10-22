@@ -1,4 +1,4 @@
-import type { Midi, Note } from "@tonejs/midi";
+import type { Midi } from "@tonejs/midi";
 
 export const SUPPORTED_HARMONICS = Array.from({ length: 15 }, (_, index) => index + 2);
 
@@ -76,7 +76,7 @@ export type HarmonicSelectionPlan = {
 
 export function sourceEventId(
   trackIndex: number,
-  note: Pick<Note, "ticks" | "midi" | "durationTicks" | "velocity">,
+  note: { ticks: number; midi: number; durationTicks: number; velocity: number },
   noteIndex: number,
 ) {
   const velocity = Math.round(note.velocity * 127);
@@ -169,7 +169,6 @@ export function buildBarTiming(
       };
     }
     const next = points[index + 1];
-    if (!next) continue;
     const ticksPerBar =
       (ticksPerQuarter * 4 * point.numerator) / point.denominator;
     if (!Number.isInteger(ticksPerBar) || ticksPerBar <= 0) {
@@ -180,6 +179,7 @@ export function buildBarTiming(
         ticksPerQuarter,
       };
     }
+    if (!next) continue;
     const barsAtChange = (next.ticks - point.ticks) / ticksPerBar;
     if (barsAtChange < 0 || Math.abs(barsAtChange - Math.round(barsAtChange)) > 1e-8) {
       return {
@@ -360,8 +360,10 @@ export function createHarmonicSelectionPlan(
   settings: HarmonicSelectionSettings,
   timing: BarTiming,
 ): HarmonicSelectionPlan {
-  if (!settings.seed.trim()) throw new Error("Enter a random seed.");
-  if (settings.scope === "bar" && !timing.supported) {
+  const randomMode = settings.mode.endsWith("random");
+  const scope = randomMode ? settings.scope : "conversion";
+  if (randomMode && !settings.seed.trim()) throw new Error("Enter a random seed.");
+  if (scope === "bar" && !timing.supported) {
     throw new Error(timing.reason ?? "Per-bar selection is unavailable for this MIDI timing.");
   }
   const grouping = new Map<string, SelectionEvent[]>();
@@ -370,9 +372,9 @@ export function createHarmonicSelectionPlan(
   );
   for (const event of orderedEvents) {
     const groupId =
-      settings.scope === "conversion"
+      scope === "conversion"
         ? "conversion"
-        : settings.scope === "source-note"
+        : scope === "source-note"
           ? `event:${event.id}`
           : barGroup(event.ticks, timing);
     const groupEvents = grouping.get(groupId) ?? [];

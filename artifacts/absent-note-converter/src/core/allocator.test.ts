@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 import { allocateDynamicVoices } from "./allocator";
 
 describe("dynamic channel allocator", () => {
+  it("does not share an overlapping same pitch when nearest-correction channels are exhausted", () => {
+    expect(() => allocateDynamicVoices([
+      { id: "first", note: 60, startTicks: 0, endTicks: 480, correctionCents: 0 },
+      { id: "second", note: 60, startTicks: 120, endTicks: 240, correctionCents: 1 },
+    ], { channels: [0], exhaustion: "nearest-correction" })).toThrow(/Insufficient channels/);
+  });
   it("never gives overlapping differently tuned notes the same applied bend", () => {
     const result = allocateDynamicVoices(
       [

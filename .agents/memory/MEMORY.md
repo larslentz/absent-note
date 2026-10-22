@@ -1,1 +1,2 @@
 - [Absent Note Converter privacy](absent-note-converter-privacy.md) — MIDI/WAV work and profile storage must remain local to the browser.
+- [Harmonic perception](harmonic-perception.md) — GCD, layer parity, and sine normalization are mathematical properties, not perceptual guarantees.
