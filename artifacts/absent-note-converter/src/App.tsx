@@ -781,6 +781,29 @@ function App() {
                 </div>
               </div>
             </article>
+            <article className="panel">
+              <div className="panel-head">
+                <h2 className="panel-title"><span className="section-number">06</span><ArrowDownToLine size={15} /> Export</h2>
+                <span className="panel-kicker">LOCAL FILE</span>
+              </div>
+              <div className="panel-body">
+                <div className="export-row">
+                  <div className="export-summary"><strong>{conversion?.outputFileName ?? (file ? `${file.name.replace(/\.(mid|midi)$/i, '')}_absent` : 'No output prepared')}</strong><br />{conversion ? `${conversion.noteCount} generated notes · ${conversion.outputTrackCount} Type 1 tracks` : 'Convert the selected source tracks to create a new MIDI file.'}</div>
+                  <div className="export-buttons">
+                    <button type="button" className="btn" onClick={convertCurrentMidi} disabled={busy || !sourceMidi} data-testid="button-convert-midi"><Activity size={13} /> {busy ? 'Converting…' : 'Convert MIDI'}</button>
+                    <button type="button" className="btn btn-primary" onClick={exportMidi} disabled={!conversion} data-testid="button-export"><ArrowDownToLine size={14} /> MIDI + settings</button>
+                    <button type="button" className="btn" onClick={() => void exportWav()} disabled={!sourceMidi} data-testid="button-export-wav"><AudioLines size={13} /> Preview WAV</button>
+                  </div>
+                </div>
+                <div className="export-note">Standard MIDI File type 1 · JSON settings sidecar · 48 kHz / 24-bit WAV · original source is never modified</div>
+                <div className="hint" data-testid="selection-report">Current plan: {selectionMode} · pool {'{'}{candidatePool.join(', ')}{'}'}{selectionMode === 'anchored-random' ? ` · anchors {${anchors.join(', ')}} · optional {${optionalPool.join(', ')}}` : ''} · seed {randomSeed} · scope {randomScope}. MIDI retains the existing velocity/gain strategy; exact audio layer gains depend on the receiving instrument and are not encoded as constant energy.</div>
+                {conversion && <div className="hint">Last conversion: {conversion.harmonicSelectionPlan.settings.mode} · {summarizeGcdGroups(conversion.harmonicSelectionPlan.groups).map(group => `${group.count} effective groups: GCD ${group.gcd}, base ${group.baseMultiplier}×`).join('; ')} · {Object.values(conversion.harmonicSelectionPlan.skippedLayers).reduce((count, layers) => count + layers.length, 0)} skipped layers. Full source-event selections and allocation warnings are included in the JSON report.</div>}
+                {conversion && (conversion.warnings.length
+                  ? <div className="warn-box warning-list" data-testid="panel-conversion-warnings"><Info size={13} /><div><strong>{conversion.warnings.length} conversion warning(s)</strong>{conversion.warnings.map((warning, index) => <div className="warning-row" key={`${warning.type}-${index}`}>{warning.message}{warning.trackIndex !== undefined ? ` Track ${warning.trackIndex + 1}.` : ''}{warning.bar !== undefined ? ` Bar ${warning.bar}, beat ${warning.beat}.` : warning.ticks !== undefined ? ` Tick ${warning.ticks}.` : ''}</div>)}</div></div>
+                  : <div className="warn-box" data-testid="panel-conversion-warnings"><Info size={13} /><span>No range or pitch-bend warnings.</span></div>)}
+                {!conversion && <div className="warn-box"><Info size={13} /><span>Convert first. The new MIDI and reproducible JSON settings are downloaded locally and never uploaded.</span></div>}
+              </div>
+            </article>
           </section>
 
           <aside className="right-column">
@@ -894,29 +917,6 @@ function App() {
               </div>
             </article>
 
-            <article className="panel">
-              <div className="panel-head">
-                <h2 className="panel-title"><span className="section-number">06</span><ArrowDownToLine size={15} /> Export</h2>
-                <span className="panel-kicker">LOCAL FILE</span>
-              </div>
-              <div className="panel-body">
-                <div className="export-row">
-                  <div className="export-summary"><strong>{conversion?.outputFileName ?? (file ? `${file.name.replace(/\.(mid|midi)$/i, '')}_absent` : 'No output prepared')}</strong><br />{conversion ? `${conversion.noteCount} generated notes · ${conversion.outputTrackCount} Type 1 tracks` : 'Convert the selected source tracks to create a new MIDI file.'}</div>
-                  <div className="export-buttons">
-                    <button type="button" className="btn" onClick={convertCurrentMidi} disabled={busy || !sourceMidi} data-testid="button-convert-midi"><Activity size={13} /> {busy ? 'Converting…' : 'Convert MIDI'}</button>
-                    <button type="button" className="btn btn-primary" onClick={exportMidi} disabled={!conversion} data-testid="button-export"><ArrowDownToLine size={14} /> MIDI + settings</button>
-                    <button type="button" className="btn" onClick={() => void exportWav()} disabled={!sourceMidi} data-testid="button-export-wav"><AudioLines size={13} /> Preview WAV</button>
-                  </div>
-                </div>
-                <div className="export-note">Standard MIDI File type 1 · JSON settings sidecar · 48 kHz / 24-bit WAV · original source is never modified</div>
-                <div className="hint" data-testid="selection-report">Current plan: {selectionMode} · pool {'{'}{candidatePool.join(', ')}{'}'}{selectionMode === 'anchored-random' ? ` · anchors {${anchors.join(', ')}} · optional {${optionalPool.join(', ')}}` : ''} · seed {randomSeed} · scope {randomScope}. MIDI retains the existing velocity/gain strategy; exact audio layer gains depend on the receiving instrument and are not encoded as constant energy.</div>
-                {conversion && <div className="hint">Last conversion: {conversion.harmonicSelectionPlan.settings.mode} · {summarizeGcdGroups(conversion.harmonicSelectionPlan.groups).map(group => `${group.count} effective groups: GCD ${group.gcd}, base ${group.baseMultiplier}×`).join('; ')} · {Object.values(conversion.harmonicSelectionPlan.skippedLayers).reduce((count, layers) => count + layers.length, 0)} skipped layers. Full source-event selections and allocation warnings are included in the JSON report.</div>}
-                {conversion && (conversion.warnings.length
-                  ? <div className="warn-box warning-list" data-testid="panel-conversion-warnings"><Info size={13} /><div><strong>{conversion.warnings.length} conversion warning(s)</strong>{conversion.warnings.map((warning, index) => <div className="warning-row" key={`${warning.type}-${index}`}>{warning.message}{warning.trackIndex !== undefined ? ` Track ${warning.trackIndex + 1}.` : ''}{warning.bar !== undefined ? ` Bar ${warning.bar}, beat ${warning.beat}.` : warning.ticks !== undefined ? ` Tick ${warning.ticks}.` : ''}</div>)}</div></div>
-                  : <div className="warn-box" data-testid="panel-conversion-warnings"><Info size={13} /><span>No range or pitch-bend warnings.</span></div>)}
-                {!conversion && <div className="warn-box"><Info size={13} /><span>Convert first. The new MIDI and reproducible JSON settings are downloaded locally and never uploaded.</span></div>}
-              </div>
-            </article>
           </aside>
         </div>
 
