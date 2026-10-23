@@ -1,16 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180" viewBox="0 0 30 30" fill="none">
-  <rect width="30" height="30" rx="6" fill="#17212d"/>
-  <path
-    d="M2.5 7.5H11.5M18.5 7.5H27.5M2.5 12.5H11.5M18.5 12.5H27.5M2.5 17.5H11.5M18.5 17.5H27.5M2.5 22.5H11.5M18.5 22.5H27.5"
-    stroke="#e7b96b"
-    stroke-width="1.15"
-    stroke-linecap="round"
-  />
-  <path
-    d="M14.8 5.2V17.1M14.8 17.1C14.8 19.1 12 20.1 11 18.4C10.1 16.9 12.1 15.8 14.8 16.4"
-    stroke="#f0c879"
-    stroke-width="1.35"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  />
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+  <title>Absent Note Converter</title>
+  <rect width="32" height="32" rx="7" fill="#17212d"/>
+  <g stroke="#9aafbd" stroke-width="1.6" stroke-linecap="round" opacity=".82">
+    <path d="M2.8 7.2H10.5M21.5 7.2H29.2"/>
+    <path d="M2.8 12.2H10.5M21.5 12.2H29.2"/>
+    <path d="M2.8 17.2H10.5M21.5 17.2H29.2"/>
+    <path d="M2.8 22.2H10.5M21.5 22.2H29.2"/>
+  </g>
+  <g stroke="#e7b96b" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M16 4.8V10.6M16 12.1V16.8" stroke-width="1.9"/>
+    <ellipse
+      cx="15"
+      cy="19.5"
+      rx="3.4"
+      ry="2.2"
+      transform="rotate(-25 15 19.5)"
+      stroke-width="1.7"
+      stroke-dasharray="12 6"
+    />
+  </g>
 </svg>

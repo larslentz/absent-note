@@ -1,15 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <title>Absent Note Converter</title>
   <rect width="512" height="512" fill="#17212d"/>
-  <g transform="scale(17.0667)" fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <path
-      d="M2.5 7.5H11.5M18.5 7.5H27.5M2.5 12.5H11.5M18.5 12.5H27.5M2.5 17.5H11.5M18.5 17.5H27.5M2.5 22.5H11.5M18.5 22.5H27.5"
-      stroke="#e7b96b"
-      stroke-width="1.15"
-    />
-    <path
-      d="M14.8 5.2V17.1M14.8 17.1C14.8 19.1 12 20.1 11 18.4C10.1 16.9 12.1 15.8 14.8 16.4"
-      stroke="#f0c879"
-      stroke-width="1.35"
+  <g stroke="#9aafbd" stroke-width="14" stroke-linecap="round" opacity=".82">
+    <path d="M92 156H224M288 156H420"/>
+    <path d="M92 220H224M288 220H420"/>
+    <path d="M92 284H224M288 284H420"/>
+    <path d="M92 348H224M288 348H420"/>
+  </g>
+  <g stroke="#e7b96b" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M256 130V187M256 202V287" stroke-width="17"/>
+    <ellipse
+      cx="232"
+      cy="316"
+      rx="44"
+      ry="28"
+      transform="rotate(-25 232 316)"
+      stroke-width="15"
+      stroke-dasharray="150 80"
     />
   </g>
 </svg>
