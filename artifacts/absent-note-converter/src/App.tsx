@@ -594,7 +594,12 @@ function App() {
       <header className="topbar">
         <div className="brand-cluster">
         <div className="brand">
-          <div className="brand-mark"><AudioLines size={17} strokeWidth={2.2} /></div>
+          <div className="brand-mark" aria-hidden="true">
+            <svg width="30" height="30" viewBox="0 0 30 30" fill="none">
+              <path d="M2.5 7.5H11.5M18.5 7.5H27.5M2.5 12.5H11.5M18.5 12.5H27.5M2.5 17.5H11.5M18.5 17.5H27.5M2.5 22.5H11.5M18.5 22.5H27.5" stroke="currentColor" strokeWidth="1.15" strokeLinecap="round" />
+              <path d="M14.8 5.2V17.1M14.8 17.1C14.8 19.1 12 20.1 11 18.4C10.1 16.9 12.1 15.8 14.8 16.4" stroke="#e7b96b" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
           <div><div className="brand-name">Absent Note Converter</div><div className="brand-sub">harmonic study workstation</div></div>
         </div>
           <div className="creator-credit">
@@ -623,6 +628,9 @@ function App() {
             <button className="btn btn-primary" type="button" onClick={() => fileInput.current?.click()} data-testid="button-import-midi"><Upload size={14} /> Import MIDI</button>
             <input ref={fileInput} className="file-input" type="file" accept=".mid,.midi,audio/midi,audio/x-midi" data-testid="input-midi-file" onChange={event => onFile(event.target.files?.[0])} />
           </div>
+        </div>
+        <div className="score-ornament" aria-hidden="true">
+          <span className="score-ornament-rest" />
         </div>
 
         <div className="workspace-grid">

@@ -1,4 +1,16 @@
-<svg width="180" height="180" viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
-<rect width="180" height="180" rx="36" fill="#17212d"/>
-<path d="M36 94h22l13-35 20 66 19-53 13 23h22" fill="none" stroke="#e7b96b" stroke-linecap="round" stroke-linejoin="round" stroke-width="9"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180" viewBox="0 0 30 30" fill="none">
+  <rect width="30" height="30" rx="6" fill="#17212d"/>
+  <path
+    d="M2.5 7.5H11.5M18.5 7.5H27.5M2.5 12.5H11.5M18.5 12.5H27.5M2.5 17.5H11.5M18.5 17.5H27.5M2.5 22.5H11.5M18.5 22.5H27.5"
+    stroke="#e7b96b"
+    stroke-width="1.15"
+    stroke-linecap="round"
+  />
+  <path
+    d="M14.8 5.2V17.1M14.8 17.1C14.8 19.1 12 20.1 11 18.4C10.1 16.9 12.1 15.8 14.8 16.4"
+    stroke="#f0c879"
+    stroke-width="1.35"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
 </svg>
