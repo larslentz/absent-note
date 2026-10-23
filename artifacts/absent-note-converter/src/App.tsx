@@ -6,6 +6,7 @@ import {
   RotateCcw, Save, Settings2, ShieldCheck, SkipBack, SlidersHorizontal,
   Upload, Volume2, X,
 } from 'lucide-react';
+import { GhostNoteWatermark } from './components/ghost-note-watermark';
 import { harmonicOffset, harmonicWeight, layerLevelDb, weightFromDecibels } from './core/math';
 import {
   convertMidi,
@@ -617,6 +618,7 @@ function App() {
       </header>
 
       <main className="main">
+        <GhostNoteWatermark />
         <div className="page-heading">
           <div>
             <div className="eyebrow">MIDI · HARMONIC TRANSFORM</div>

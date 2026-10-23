@@ -71,7 +71,12 @@ button { cursor: pointer; }
 .offline-pill { display:inline-flex; align-items:center; gap:7px; color:#8fcdb8; border:1px solid #2d5148; background:#162823; border-radius:999px; padding:6px 10px; }
 .offline-pill i { width:6px;height:6px;border-radius:50%;background:#64c6a5; }
 .top-action { display:flex;align-items:center;gap:7px;color:#a9b2bb;background:transparent;border:0;padding:8px;font-size:12px; }
-.main { max-width:1480px; margin:0 auto; padding:29px 32px 44px; }
+.main { position:relative; isolation:isolate; max-width:1480px; margin:0 auto; padding:29px 32px 44px; }
+.ghost-note-watermark {
+  position:absolute; z-index:-1; top:1px; right:clamp(160px,19vw,290px);
+  width:clamp(220px,27vw,360px); height:205px; overflow:visible;
+  color:#9aafbd; opacity:.14; pointer-events:none; user-select:none;
+}
 .page-heading { display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:24px; }
 .eyebrow { color:#6fbeaa; font:10px 'DM Mono',monospace; letter-spacing:.16em; text-transform:uppercase; }
 h1 { font:600 clamp(24px,3vw,32px) 'Avenir Next', 'Segoe UI', sans-serif; letter-spacing:-.045em; margin:7px 0 5px; color:#eef1f2; }
@@ -228,6 +233,13 @@ h1 { font:600 clamp(24px,3vw,32px) 'Avenir Next', 'Segoe UI', sans-serif; letter
  .footer-line { align-items:flex-start;gap:10px;flex-direction:column; }
 }
 @media (prefers-reduced-motion: reduce) { *,*::before,*::after { transition:none!important;scroll-behavior:auto!important; } }
+
+@media (max-width: 900px) {
+  .ghost-note-watermark { right:8%; width:250px; opacity:.1; }
+}
+@media (max-width: 680px) {
+  .ghost-note-watermark { top:0; right:0; width:190px; height:150px; opacity:.075; }
+}
 
 .formula-table { margin-top:12px;overflow-x:auto;border:1px solid #29343a;border-radius:7px;background:#11171a; }
 .formula-row { display:grid;grid-template-columns:.55fr .8fr .9fr .8fr .9fr;gap:7px;padding:7px 9px;border-bottom:1px solid #242e33;font:10px var(--font-mono,monospace);color:#c5d4ce;white-space:nowrap; }
