@@ -285,6 +285,21 @@ h1 { font:600 clamp(24px,3vw,32px) 'Avenir Next', 'Segoe UI', sans-serif; letter
 .warm-amber-frame .brand-mark { color: #292f35; background: #e7b96b; }
 .warm-amber-frame .brand-name, .warm-amber-frame h1 { color: #f4f1e9; }
 .warm-amber-frame .brand-sub { color: #a3adb3; }
+.brand-cluster { display: flex; align-items: center; gap: 24px; }
+.creator-credit { display: flex; flex-direction: column; gap: 3px; padding-left: 24px; border-left: 1px solid #314151; flex-shrink: 0; }
+.creator-byline { color: #a3adb3; font: 9px var(--app-font-mono); letter-spacing: .16em; }
+.creator-link { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; color: #e7b96b; font-size: 12px; font-weight: 600; text-decoration: underline; text-underline-offset: 4px; text-decoration-color: #806c49; transition: color .15s, text-decoration-color .15s; }
+.creator-link:hover { color: #f6d38b; text-decoration-color: currentColor; }
+.creator-link:focus-visible { outline: 2px solid #f0c879; outline-offset: 5px; border-radius: 2px; }
+@media (max-width: 900px) {
+  .topbar { height: auto; min-height: 68px; flex-wrap: wrap; gap: 14px; padding-top: 14px; padding-bottom: 14px; }
+  .top-meta { margin-left: auto; }
+}
+@media (max-width: 680px) {
+  .brand-cluster { flex-wrap: wrap; gap: 12px 20px; }
+  .creator-credit { padding-left: 0; border-left: 0; }
+  .top-meta { gap: 8px; }
+}
 .warm-amber-frame .top-meta { color: #a5b0b8; }
 .warm-amber-frame .offline-pill { color: #dfc58f; border-color: #6c5a3c; background: #302c25; }
 .warm-amber-frame .offline-pill i, .warm-amber-frame .status-line.ready::before { background: #e7b96b; }

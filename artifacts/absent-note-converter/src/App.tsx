@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Midi } from '@tonejs/midi';
 import {
-  Activity, ArrowDownToLine, AudioLines, Check, ChevronDown, CircleHelp,
+  Activity, ArrowDownToLine, ArrowUpRight, AudioLines, Check, ChevronDown, CircleHelp,
   FileMusic, FolderOpen, Info, Keyboard, Music2, Pause, Play,
   RotateCcw, Save, Settings2, ShieldCheck, SkipBack, SlidersHorizontal,
   Upload, Volume2, X,
@@ -592,9 +592,17 @@ function App() {
     <div className="warm-amber-frame">
     <div className="studio">
       <header className="topbar">
+        <div className="brand-cluster">
         <div className="brand">
           <div className="brand-mark"><AudioLines size={17} strokeWidth={2.2} /></div>
           <div><div className="brand-name">Absent Note Converter</div><div className="brand-sub">harmonic study workstation</div></div>
+        </div>
+          <div className="creator-credit">
+            <span className="creator-byline">BY LARS LENTZ</span>
+            <a className="creator-link" href="https://sleekbio.com/larslentz" target="_blank" rel="noopener noreferrer">
+              More by Lars <ArrowUpRight size={14} aria-hidden="true" />
+            </a>
+          </div>
         </div>
         <div className="top-meta">
           <span className="offline-pill" data-testid="status-offline"><i /> LOCAL ONLY · NO UPLOADS</span>
